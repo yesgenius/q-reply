@@ -1,0 +1,78 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# --- Virtualenv ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Environment variables & secrets ---
+.env
+.env.*
+!.env.example
+
+# --- SQLAlchemy / Alembic ---
+alembic.ini
+alembic/versions/__pycache__/
+
+# --- Databases ---
+*.sqlite
+*.db
+*.db-journal
+*.duckdb
+
+# --- Docker ---
+# (docker-compose override files & build artifacts)
+docker-compose.override.yml
+docker-data/
+tmp/
+*.log
+
+# --- WSL ---
+# (WSL-specific temp files)
+.wslconfig
+*.wsl
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- Editors & IDEs ---
+.vscode/
+.idea/
+*.iml
+
+# --- Mypy & lint ---
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+
+# --- Test / coverage ---
+.coverage
+htmlcov/
+.tox/
+.nox/
+.cache/
+pytest_cache/
+
+# --- Misc ---
+.work/
+*.bak
+*.swp
+*.swo
+
+# ==============================================
+# Exclude all work directories at any level
+# ==============================================
+**/.work/

@@ -1,0 +1,646 @@
+"""Question categorization prompt module with answer context support.
+
+This module provides functionality to categorize questions
+into predefined categories using LLM with structured JSON output.
+Now supports including answers for enhanced context during categorization.
+
+The module uses caching for system prompts to avoid redundant computations
+while maintaining flexibility for dynamic categories.
+
+Example:
+    Basic usage with answer context:
+
+    ```python
+    from prompts import define_category_prompt
+
+    # Define categories
+    categories = {
+        "Technical": "Questions about implementation, architecture, and code",
+        "Business": "Questions about ROI, costs, and business value",
+        "Process": "Questions about workflows, methodologies, and best practices"
+    }
+
+    # Initialize categorization system
+    define_category_prompt.update_system_prompt(categories=categories)
+
+    # Categorize with answer context (automatically used if answer provided)
+    question = "How do you handle database migrations?"
+    answer = "We use Flyway for version control and automated migrations in our CI/CD pipeline."
+    result, messages = define_category_prompt.run(question, answer=answer)
+    print(result)  # {"category": "Technical", "confidence": 0.95}
+    ```
+
+Usage:
+    python -m prompts.define_category_prompt
+"""
+
+import json
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+from gigachat.client import GigaChatClient
+
+logger = logging.getLogger(__name__)
+
+# Initialize LLM client
+llm = GigaChatClient()
+
+# Model parameters optimized for structured output
+params: Dict[str, Any] = {
+    "model": "GigaChat",
+    "temperature": 0.1,  # Low temperature for consistent categorization
+    "top_p": 0.95,
+    "stream": False,
+    "max_tokens": 300,  # Sufficient for JSON with reasoning
+    "repetition_penalty": 1.0,
+}
+
+# Global cached variables
+_system_prompt: Optional[str] = None
+_chat_history: List[Dict[str, str]] = []
+_current_categories: Optional[Dict[str, str]] = (
+    None  # Cache current categories for validation
+)
+
+
+def _format_user_prompt(question: str, answer: Optional[str] = None) -> str:
+    """Format the user prompt with question and optional answer.
+
+    Creates a structured user prompt that includes the question
+    and optionally the answer for enhanced context during categorization.
+
+    Args:
+        question: The question to categorize.
+        answer: Optional answer to provide additional context.
+            If provided, will be included in the prompt for better accuracy.
+
+    Returns:
+        Formatted user prompt string.
+
+    Example:
+        >>> # Without answer
+        >>> prompt = _format_user_prompt("What is Docker?")
+        >>> print(prompt)
+        What is Docker?
+
+        >>> # With answer
+        >>> prompt = _format_user_prompt("What is Docker?", "Docker is a containerization platform...")
+        >>> print(prompt)
+        Question: What is Docker?
+        Answer: Docker is a containerization platform...
+        Based on the question and its answer above, categorize the question into the most appropriate category.
+    """
+    if answer:
+        # Include both question and answer for better context
+        user_prompt = (
+            f"Question: {question}\n\nAnswer: {answer}\n\n"
+            "Based on the question and its answer above, categorize the question into the most appropriate category."
+        )
+    else:
+        # Use only the question
+        user_prompt = f"Question: {question}\n\nCategorize the question into the most appropriate category."
+
+    return user_prompt
+
+
+def _generate_system_prompt(**kwargs: Any) -> str:
+    """Generate system prompt for question categorization.
+
+    Creates a structured prompt that instructs the LLM to categorize
+    questions into predefined categories with JSON output.
+
+    Args:
+        **kwargs: Required parameters for categorization:
+            categories (Dict[str, str]): Dictionary where keys are category names
+                and values are category descriptions.
+
+    Returns:
+        System prompt string for categorization task.
+
+    Raises:
+        ValueError: If required parameters are missing or invalid.
+
+    Example:
+        >>> prompt = _generate_system_prompt(
+        ...     categories={"Research": "Academic questions", "Applied": "Practical questions"}
+        ... )
+    """
+    categories = kwargs.get("categories")
+
+    # Validate required parameters
+    if not categories or not isinstance(categories, dict):
+        raise ValueError("categories dictionary is required for categorization")
+
+    if not categories:
+        raise ValueError("categories dictionary cannot be empty")
+
+    # Format categories for the prompt
+    categories_description = "\n".join(
+        [f"- [{name}]: [{description}]" for name, description in categories.items()]
+    )
+
+    # Create professional categorization prompt
+    prompt = f"""You are an expert question categorizer.
+
+Your task is to analyze questions and categorize them into the most appropriate category based on their content and intent.
+
+Available categories:
+{categories_description}
+
+Instructions:
+1. Carefully analyze the question's main topic and intent;
+2. Match it to the MOST appropriate category from the list above;
+3. Provide a confidence score (0.0 to 1.0) for your categorization;
+
+Output format:
+You MUST respond with ONLY a valid JSON object in this exact format:
+{{
+    "category": "CategoryName",
+    "confidence": 0.95,
+    "reasoning": "Brief explanation of why this category was chosen"
+}}
+
+Rules:
+- The category MUST be one of: {', '.join(categories.keys())};
+- Confidence should reflect how well the question fits the category;
+- Reasoning should be 1-2 sentences maximum;
+- Do not include any text outside the JSON object;
+- Ensure the JSON is valid and properly formatted."""
+
+    return prompt
+
+
+def _generate_chat_history(**kwargs: Any) -> List[Dict[str, str]]:
+    """Generate chat history with categorization examples.
+
+    Creates example exchanges to help the model understand
+    the expected categorization behavior.
+
+    Args:
+        **kwargs: Optional parameters:
+            include_examples (bool): Whether to include example categorizations.
+            categories (Dict[str, str]): Categories for generating relevant examples.
+
+    Returns:
+        List of message dictionaries with example categorizations.
+    """
+    history: List[Dict[str, str]] = []
+
+    # You can add example categorizations here if needed
+    # Currently returns empty history for simplicity
+
+    return history
+
+
+def update_system_prompt(**kwargs: Any) -> str:
+    """Update or retrieve the cached system prompt.
+
+    Updates the global system prompt if kwargs are provided,
+    otherwise returns the existing cached prompt.
+
+    Args:
+        **kwargs: Parameters for prompt generation:
+            categories (Dict[str, str]): Required. Category definitions.
+
+    Returns:
+        The current system prompt string.
+
+    Raises:
+        ValueError: If attempting to generate prompt without required parameters
+            or system prompt is not initialized.
+    """
+    global _system_prompt, _current_categories
+
+    if kwargs:
+        # Cache categories for validation in run()
+        if "categories" in kwargs:
+            cats = kwargs["categories"]
+            _current_categories = dict(cats)
+
+        _system_prompt = _generate_system_prompt(**kwargs)
+        logger.debug("System prompt updated with new categories")
+    elif _system_prompt is None:
+        raise ValueError("System prompt not initialized. Call with categories first.")
+    else:
+        logger.debug("Using cached system prompt")
+
+    return _system_prompt
+
+
+def update_chat_history(**kwargs: Any) -> List[Dict[str, str]]:
+    """Update or retrieve the cached chat history.
+
+    Updates the global chat history if kwargs are provided,
+    otherwise returns the existing cached history.
+
+    Args:
+        **kwargs: Parameters for history generation.
+            clear (bool): If True, clears the existing history.
+            include_examples (bool): If True, includes example categorizations.
+            categories (Dict[str, str]): Categories for generating examples.
+
+    Returns:
+        The current chat history list (copy).
+    """
+    global _chat_history
+
+    if kwargs:
+        if kwargs.get("clear", False):
+            _chat_history = []
+            logger.debug("Chat history cleared")
+        else:
+            _chat_history = _generate_chat_history(**kwargs)
+            logger.debug(f"Chat history updated with {len(_chat_history)} messages")
+    else:
+        logger.debug(f"Using cached chat history (length: {len(_chat_history)})")
+
+    return _chat_history.copy()
+
+
+def add_to_chat_history(message: Dict[str, str]) -> None:
+    """Add a single message to chat history.
+
+    Args:
+        message: Dictionary with 'role' and 'content' keys.
+
+    Raises:
+        ValueError: If message is invalid.
+    """
+    if not isinstance(message, dict):
+        raise ValueError("Message must be a dictionary")
+
+    if "role" not in message or "content" not in message:
+        raise ValueError("Message must have 'role' and 'content' keys")
+
+    global _chat_history
+    _chat_history.append(message)
+    logger.debug(f"Added {message['role']} message to chat history")
+
+
+def get_messages(
+    user_question: str, answer: Optional[str] = None
+) -> List[Dict[str, str]]:
+    """Build complete message list for LLM request.
+
+    Args:
+        user_question: The question to categorize.
+        answer: Optional answer to provide additional context.
+
+    Returns:
+        List of message dictionaries formatted for LLM API.
+
+    Raises:
+        ValueError: If system prompt is not initialized.
+    """
+    messages_list = []
+
+    # Get system prompt from cache
+    system_prompt = update_system_prompt()
+    if system_prompt:
+        messages_list.append({"role": "system", "content": system_prompt})
+
+    # Get chat history from cache
+    history = update_chat_history()
+    messages_list.extend(history)
+
+    # Format and add user prompt with optional answer context
+    user_prompt = _format_user_prompt(user_question, answer)
+    messages_list.append({"role": "user", "content": user_prompt})
+
+    return messages_list
+
+
+def _parse_json_response(response_text: str) -> Dict[str, Any]:
+    """Parse and validate JSON response from LLM.
+
+    Uses json.JSONDecoder.raw_decode() to safely extract JSON object
+    from response text, handling cases where LLM might add extra text
+    before or after the JSON.
+
+    Args:
+        response_text: Raw text response from LLM.
+
+    Returns:
+        Parsed JSON as dictionary.
+
+    Raises:
+        ValueError: If response is not valid JSON or missing required fields.
+    """
+    try:
+        # Clean the response text
+        text = response_text.strip()
+
+        # Find the start of JSON object
+        start_idx = text.find("{")
+        if start_idx == -1:
+            raise ValueError("No JSON object found in response")
+
+        # Use JSONDecoder to properly parse JSON and find its end
+        decoder = json.JSONDecoder()
+        result, end_idx = decoder.raw_decode(text[start_idx:])
+
+        logger.debug(
+            f"Successfully extracted JSON from position {start_idx} to {start_idx + end_idx}"
+        )
+
+        # Validate required fields
+        if not isinstance(result, dict):
+            raise ValueError("Response must be a JSON object")
+
+        if "category" not in result:
+            raise ValueError("Response missing 'category' field")
+
+        if "confidence" not in result:
+            raise ValueError("Response missing 'confidence' field")
+
+        # Ensure confidence is a number
+        confidence = result["confidence"]
+        if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+            raise ValueError("Confidence must be a number between 0 and 1")
+
+        # Validate category against current categories if available
+        if _current_categories and result["category"] not in _current_categories:
+            raise ValueError(
+                f"Invalid category '{result['category']}'. "
+                f"Must be one of: {', '.join(_current_categories.keys())}"
+            )
+
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON from response: {response_text[:200]}...")
+        raise ValueError(f"Invalid JSON format: {e}")
+    except Exception as e:
+        if "Invalid category" in str(e):
+            raise  # Re-raise category validation errors as-is
+        logger.error(f"Failed to extract JSON from response: {response_text[:200]}...")
+        raise ValueError(f"Failed to parse response: {e}")
+
+
+def run(
+    user_question: str,
+    answer: Optional[str] = None,
+    custom_params: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, List[Dict[str, str]]]:
+    """Categorize a question and return structured JSON output with messages.
+
+    Args:
+        user_question: Question to categorize.
+        answer: Optional answer to provide additional context for categorization.
+            If provided, will be included in the prompt for better accuracy.
+        custom_params: Optional parameter overrides for this request.
+
+    Returns:
+        Tuple containing:
+            - Valid JSON string with categorization result containing:
+                - category: The selected category name
+                - confidence: Confidence score (0.0 to 1.0)
+                - reasoning: Brief explanation for the categorization
+            - List of messages sent to the LLM
+
+    Raises:
+        ValueError: If system prompt not initialized, invalid response format,
+            or category not in the allowed list.
+        RuntimeError: If LLM response format is unexpected or streaming is requested.
+
+    Example:
+        >>> # Without answer context
+        >>> result, messages = run("How do we scale microservices?")
+        >>>
+        >>> # With answer context - just pass the answer parameter
+        >>> result, messages = run(
+        ...     "How do we scale microservices?",
+        ...     answer="We use Kubernetes for orchestration and horizontal scaling."
+        ... )
+        >>> print(result)
+        '{"category": "Technical", "confidence": 0.95, "reasoning": "..."}'
+    """
+    # Validate system prompt is initialized
+    if _system_prompt is None:
+        raise ValueError(
+            "System prompt not initialized. Call update_system_prompt with categories first."
+        )
+
+    # Merge custom parameters with defaults
+    request_params = {k: v for k, v in params.items() if v is not None}
+    if custom_params:
+        for k, v in custom_params.items():
+            if v is not None:
+                request_params[k] = v
+
+    # Categorization requires non-streaming mode for structured output
+    if request_params.get("stream", False):
+        raise RuntimeError(
+            "Streaming not supported for categorization. Structured JSON output requires non-streaming mode."
+        )
+
+    # Build messages using cached data with optional answer
+    messages_list = get_messages(user_question, answer)
+
+    logger.debug(f"Categorizing question: {user_question[:100]}...")
+    if answer:
+        logger.debug(f"Using answer context: {answer[:100]}...")
+    logger.debug(f"Request params: {request_params}")
+
+    try:
+        # Make LLM request
+        response = llm.chat_completion(messages=messages_list, **request_params)
+
+        # Safely extract content from response with proper validation
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Expected dict response, got {type(response)}")
+
+        if "choices" not in response:
+            raise RuntimeError("Response missing 'choices' field")
+
+        choices = response["choices"]
+        if not isinstance(choices, list) or len(choices) == 0:
+            raise RuntimeError("Response 'choices' is empty or invalid")
+
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise RuntimeError(f"Expected dict in choices[0], got {type(first_choice)}")
+
+        if "message" not in first_choice:
+            raise RuntimeError("Response choice missing 'message' field")
+
+        message = first_choice["message"]
+        if not isinstance(message, dict) or "content" not in message:
+            raise RuntimeError("Response message missing 'content' field")
+
+        response_text = message["content"]
+
+        # Parse and validate JSON response (includes category validation)
+        parsed_result = _parse_json_response(response_text)
+
+        # Return as formatted JSON string with messages
+        result_json = json.dumps(parsed_result, ensure_ascii=False, indent=2)
+        return result_json, messages_list
+
+    except Exception as e:
+        logger.error(f"Categorization failed: {e}")
+        raise
+
+
+# Test section
+if __name__ == "__main__":
+    """Test the question categorization module with answer context support."""
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]",
+    )
+
+    print("=== Question Categorization Module Test (with Answer Context) ===\n")
+
+    # Test 1: Initialize categorization system
+    try:
+        print("Test 1: Initialize categorization system")
+
+        # Define test categories
+        test_categories = {
+            "Architecture": "Questions about system design, microservices, and infrastructure",
+            "DevOps": "Questions about CI/CD, deployment, monitoring, and operations",
+            "Security": "Questions about authentication, authorization, and security best practices",
+            "Performance": "Questions about optimization, scaling, and performance tuning",
+            "Tools": "Questions about specific tools, frameworks, and technologies",
+        }
+
+        # Initialize the system
+        prompt = update_system_prompt(categories=test_categories)
+        print(f"✓ System initialized")
+        print(f"✓ Categories: {', '.join(test_categories.keys())}")
+        print(f"✓ Prompt length: {len(prompt)} characters\n")
+
+    except Exception as e:
+        logger.error(f"Test 1 failed: {e}")
+        raise
+
+    # Test 2: Categorize without answer context (backward compatibility)
+    try:
+        print("Test 2: Categorize questions WITHOUT answer context")
+
+        test_questions = [
+            "How do you implement zero-downtime deployments in Kubernetes?",
+            "What's the best way to handle authentication in microservices?",
+        ]
+
+        for i, question in enumerate(test_questions, 1):
+            print(f"\nQuestion {i}: {question}")
+
+            try:
+                result_json, messages = run(question)
+                result = json.loads(result_json)
+
+                print(f"✓ Category: {result['category']}")
+                print(f"✓ Confidence: {result['confidence']:.2f}")
+                print(f"✓ Reasoning: {result.get('reasoning', 'N/A')}")
+                print(f"✓ Messages sent: {len(messages)}")
+
+            except Exception as e:
+                logger.error(f"Failed to categorize question {i}: {e}")
+                print(f"✗ Categorization failed: {e}")
+
+        print("\n" + "=" * 50 + "\n")
+
+    except Exception as e:
+        logger.error(f"Test 2 failed: {e}")
+        raise
+
+    # Test 3: Test with answer context
+    try:
+        print("Test 3: Categorize questions WITH answer context")
+
+        test_qa_pairs = [
+            {
+                "question": "How do we handle database migrations?",
+                "answer": "We use Flyway for version control of database schemas and automated migration scripts in our CI/CD pipeline.",
+            },
+            {
+                "question": "What metrics should we track?",
+                "answer": "Monitor CPU usage, memory consumption, request latency, error rates, and throughput using Prometheus and Grafana.",
+            },
+        ]
+
+        for i, qa in enumerate(test_qa_pairs, 1):
+            print(f"\nQuestion {i}: {qa['question']}")
+            print(f"Answer: {qa['answer'][:80]}...")
+
+            try:
+                # Just pass the answer - it will be automatically used
+                result_json, messages = run(qa["question"], answer=qa["answer"])
+                result = json.loads(result_json)
+
+                print(f"✓ Category: {result['category']}")
+                print(f"✓ Confidence: {result['confidence']:.2f}")
+                print(f"✓ Reasoning: {result.get('reasoning', 'N/A')}")
+
+                # Check if answer was included in the prompt
+                user_message = next((m for m in messages if m["role"] == "user"), None)
+                if user_message and "Answer:" in user_message["content"]:
+                    print(f"✓ Answer context was included in prompt")
+
+            except Exception as e:
+                logger.error(f"Failed to categorize question {i}: {e}")
+                print(f"✗ Categorization failed: {e}")
+
+        print("\n" + "=" * 50 + "\n")
+
+    except Exception as e:
+        logger.error(f"Test 3 failed: {e}")
+        raise
+
+    # Test 4: Verify answer is optional
+    try:
+        print("Test 4: Verify answer parameter is optional")
+
+        question = "How to optimize queries?"
+        answer = "Use indexes, query optimization, and caching strategies."
+
+        print(f"\nQuestion: {question}")
+
+        # Test without answer
+        print("\n1. Without answer:")
+        result_json, messages = run(question)
+        result = json.loads(result_json)
+
+        user_message = next((m for m in messages if m["role"] == "user"), None)
+        if user_message and "Answer:" not in user_message["content"]:
+            print(f"✓ Answer NOT included when not provided")
+        print(f"✓ Category: {result['category']}")
+
+        # Test with answer
+        print("\n2. With answer:")
+        print(f"Answer: {answer}")
+        result_json, messages = run(question, answer=answer)
+        result = json.loads(result_json)
+
+        user_message = next((m for m in messages if m["role"] == "user"), None)
+        if user_message and "Answer:" in user_message["content"]:
+            print(f"✓ Answer WAS included when provided")
+        print(f"✓ Category: {result['category']}")
+
+        print("\n" + "=" * 50 + "\n")
+
+    except Exception as e:
+        logger.error(f"Test 4 failed: {e}")
+        raise
+
+    # Test 5: Error handling
+    try:
+        print("Test 5: Error handling with answer context")
+
+        try:
+            # This should raise ValueError even with answer provided
+            result, messages = run("Test question", answer="Test answer")
+            print("✗ Should have raised ValueError")
+        except ValueError as e:
+            print(f"✓ Correctly raised ValueError: {str(e)[:50]}...")
+
+        print("\n" + "=" * 50 + "\n")
+
+    except Exception as e:
+        logger.error(f"Test 5 failed: {e}")
+        raise
+
+    print("\n=== All tests completed successfully ===")
