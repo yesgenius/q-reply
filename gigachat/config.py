@@ -232,10 +232,39 @@ def load_config(env_file: Optional[str] = ".env") -> GigaChatConfig:
 if __name__ == "__main__":
     import sys
 
+    # Check if .env file exists and show env vars
+    env_file = Path(".env")
+    print(f"\n.env file exists: {env_file.exists()}")
+    if env_file.exists():
+        print(f".env file path: {env_file.absolute()}")
+
+    # Show GIGACHAT_* environment variables (before and after loading)
+    print("\nEnvironment variables BEFORE loading .env:")
+    for key, value in os.environ.items():
+        if key.startswith("GIGACHAT_"):
+            # Mask sensitive values
+            if "AUTH" in key or "KEY" in key or "CERT" in key:
+                masked = value[:5] + "..." + value[-5:] if len(value) > 10 else "***"
+                print(f"  {key}={masked}")
+            else:
+                print(f"  {key}={value}")
+
     try:
         config = load_config()
 
-        print("Configuration loaded successfully!")
+        print("\nEnvironment variables AFTER loading .env:")
+        for key, value in os.environ.items():
+            if key.startswith("GIGACHAT_"):
+                # Mask sensitive values
+                if "AUTH" in key or "KEY" in key or "CERT" in key:
+                    masked = (
+                        value[:5] + "..." + value[-5:] if len(value) > 10 else "***"
+                    )
+                    print(f"  {key}={masked}")
+                else:
+                    print(f"  {key}={value}")
+
+        print("\nConfiguration loaded successfully!")
         print(
             f"Authentication method: {'Basic' if config.is_basic_auth() else 'Certificate'}"
         )

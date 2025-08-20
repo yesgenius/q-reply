@@ -69,8 +69,8 @@ class GigaChatClient:
             total=self.config.max_retries,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=frozenset(
-                # ["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"]
-                ["HEAD", "GET", "OPTIONS"]  # to avoid repeated billing/duplication
+                ["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"]
+                # ["HEAD", "GET", "OPTIONS"]  # to avoid repeated billing/duplication
             ),
             backoff_factor=1,
         )

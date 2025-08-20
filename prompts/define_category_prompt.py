@@ -162,7 +162,7 @@ You MUST respond with ONLY a valid JSON object in this exact format:
 
 Rules:
 - The category MUST be one of: {', '.join(categories.keys())};
-- Confidence should reflect how well the question fits the category;
+- Confidence must be a float between 0 and 1, indicating how well the question matches the category;
 - Reasoning should be 1-2 sentences maximum;
 - Do not include any text outside the JSON object;
 - Ensure the JSON is valid and properly formatted."""

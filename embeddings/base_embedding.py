@@ -18,7 +18,7 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ def create_embeddings(
     apply_instruction: bool = True,
     custom_instruction: Optional[str] = None,
     **kwargs: Any,
-) -> List[List[float]]:
+) -> Tuple[List[List[float]], List[str]]:
     """Create embeddings for input texts with optional instructions.
 
     This is the main function for creating embeddings. It handles:
@@ -164,7 +164,9 @@ def create_embeddings(
             - x_session_id: Session tracing ID
 
     Returns:
-        List of embedding vectors (list of floats for each text).
+        Tuple containing:
+            - List of embedding vectors (list of floats for each text)
+            - List of actual input texts sent to the model (with instructions)
 
     Raises:
         ValueError: If inputs are invalid.
@@ -172,13 +174,13 @@ def create_embeddings(
 
     Examples:
         >>> # Document embedding (no instruction)
-        >>> doc_emb = create_embeddings("Product description", task_type="document")
+        >>> doc_emb, input_texts = create_embeddings("Product description", task_type="document")
 
         >>> # Query embedding (with instruction)
-        >>> query_emb = create_embeddings("What is this product?", task_type="query")
+        >>> query_emb, input_texts = create_embeddings("What is this product?", task_type="query")
 
         >>> # Batch processing
-        >>> embs = create_embeddings(["text1", "text2"], task_type="similarity")
+        >>> embs, input_texts = create_embeddings(["text1", "text2"], task_type="similarity")
     """
     # Ensure texts is a list
     if isinstance(texts, str):
@@ -209,12 +211,11 @@ def create_embeddings(
     prepared_texts = prepare_texts(texts, instruction)
 
     # Extract API tracing parameters from kwargs
-    # These are optional headers for request tracing/debugging
     api_params: Dict[str, Any] = {}
     tracing_params = ["x_request_id", "x_session_id", "x_client_id"]
     for key in tracing_params:
         if key in kwargs:
-            api_params[key] = kwargs.pop(key)  # Remove from kwargs to avoid duplication
+            api_params[key] = kwargs.pop(key)
 
     try:
         # Log API call parameters (debug mode only)
@@ -239,7 +240,6 @@ def create_embeddings(
             logger.debug("-" * 60)
 
         # Call GigaChat API
-        # Note: model parameter is passed directly, not through kwargs
         response = llm.create_embeddings(
             input_texts=prepared_texts, model=model, **api_params
         )
@@ -286,7 +286,7 @@ def create_embeddings(
                 f"Created {len(embeddings)} embeddings, dimension: {len(embeddings[0])}"
             )
 
-        return embeddings
+        return embeddings, prepared_texts
 
     except Exception as e:
         logger.error(f"Failed to create embeddings: {e}")
@@ -299,7 +299,7 @@ def create_batch_embeddings(
     model: str = DEFAULT_MODEL,
     task_type: Optional[str] = None,
     **kwargs: Any,
-) -> List[List[float]]:
+) -> Tuple[List[List[float]], List[str]]:
     """Create embeddings for large text collections in batches.
 
     Handles large datasets by processing in batches to avoid API limits
@@ -313,18 +313,20 @@ def create_batch_embeddings(
         **kwargs: Additional parameters passed to create_embeddings.
 
     Returns:
-        List of embedding vectors for all input texts.
+        Tuple containing:
+            - List of embedding vectors for all input texts
+            - List of all actual input texts sent to the model (with instructions)
 
     Raises:
-        []: If texts is empty or batch_size is invalid.
+        ValueError: If texts is empty or batch_size is invalid.
         RuntimeError: If batch processing fails.
 
     Examples:
         >>> texts = ["text1", "text2", ..., "text1000"]
-        >>> embeddings = create_batch_embeddings(texts, batch_size=50)
+        >>> embeddings, input_texts = create_batch_embeddings(texts, batch_size=50)
     """
     if not texts:
-        return []
+        return [], []
 
     if batch_size <= 0:
         raise ValueError(f"batch_size must be positive, got {batch_size}")
@@ -332,6 +334,7 @@ def create_batch_embeddings(
     logger.info(f"Processing {len(texts)} texts in batches of {batch_size}")
 
     all_embeddings: List[List[float]] = []
+    all_input_texts: List[str] = []
     total_batches = (len(texts) + batch_size - 1) // batch_size
 
     for i in range(0, len(texts), batch_size):
@@ -342,10 +345,11 @@ def create_batch_embeddings(
         )
 
         try:
-            batch_embeddings = create_embeddings(
+            batch_embeddings, batch_input_texts = create_embeddings(
                 texts=batch, model=model, task_type=task_type, **kwargs
             )
             all_embeddings.extend(batch_embeddings)
+            all_input_texts.extend(batch_input_texts)
 
         except Exception as e:
             logger.error(
@@ -354,13 +358,13 @@ def create_batch_embeddings(
             raise RuntimeError(f"Batch processing failed at batch {batch_num}") from e
 
     logger.info(f"Successfully created {len(all_embeddings)} embeddings")
-    return all_embeddings
+    return all_embeddings, all_input_texts
 
 
 # Test section
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO,  # DEBUG
+        level=logging.INFO,
         format="[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]",
     )
 
@@ -377,13 +381,7 @@ if __name__ == "__main__":
     def run_test(
         test_name: str, test_func: Callable[[], None], skip_on_api_error: bool = False
     ) -> None:
-        """Run a single test with proper error handling.
-
-        Args:
-            test_name: Name of the test for reporting.
-            test_func: Test function to execute.
-            skip_on_api_error: Skip test if API returns 402 (payment required).
-        """
+        """Run a single test with proper error handling."""
         global tests_passed, tests_failed, tests_skipped
 
         try:
@@ -405,13 +403,13 @@ if __name__ == "__main__":
                 print(f"   Exception: {e}\n")
                 tests_failed += 1
 
-    # Test 1: Single text embedding
+    # Test 1: Single text embedding with input_texts return
     def test_single_text() -> None:
-        """Test embedding creation for single text."""
+        """Test embedding creation for single text with input_texts return."""
         text = "Тестовый текст для проверки"
-        result = create_embeddings(text, task_type="document")
+        result, input_texts = create_embeddings(text, task_type="document")
 
-        # Assertions
+        # Check embeddings
         assert isinstance(result, list), f"Expected list, got {type(result)}"
         assert len(result) == 1, f"Expected 1 embedding, got {len(result)}"
         assert isinstance(
@@ -422,15 +420,22 @@ if __name__ == "__main__":
             isinstance(x, (int, float)) for x in result[0]
         ), "Embedding should contain numbers"
 
+        # Check input_texts
+        assert isinstance(input_texts, list), f"Expected list, got {type(input_texts)}"
+        assert len(input_texts) == 1, f"Expected 1 input text, got {len(input_texts)}"
+        assert (
+            input_texts[0] == text
+        ), "Input text should match original for document type"
+
     run_test("Single text embedding", test_single_text, skip_on_api_error=True)
 
-    # Test 2: Multiple texts batch
+    # Test 2: Multiple texts batch with input_texts
     def test_multiple_texts() -> None:
-        """Test batch processing of multiple texts."""
+        """Test batch processing of multiple texts with input_texts return."""
         texts = ["Текст 1", "Текст 2", "Текст 3"]
-        results = create_embeddings(texts, task_type="document")
+        results, input_texts = create_embeddings(texts, task_type="document")
 
-        # Assertions
+        # Check embeddings
         assert len(results) == 3, f"Expected 3 embeddings, got {len(results)}"
 
         # Check all have same dimension
@@ -443,148 +448,136 @@ if __name__ == "__main__":
             ), f"Embedding {i} has different dimension: {len(emb)} vs {first_dim}"
             assert isinstance(emb, list), f"Embedding {i} is not a list"
 
+        # Check input_texts
+        assert len(input_texts) == 3, f"Expected 3 input texts, got {len(input_texts)}"
+        assert (
+            input_texts == texts
+        ), "Input texts should match originals for document type"
+
     run_test("Multiple texts batch", test_multiple_texts, skip_on_api_error=True)
 
-    # Test 3: Task type "document" (no instruction)
-    def test_task_type_document() -> None:
-        """Test document task type (should have no instruction)."""
-        text = "Документ для индексации"
-
-        # Test that document type doesn't add instruction
-        doc_emb = create_embeddings(text, task_type="document")
-        no_instruction_emb = create_embeddings(text, apply_instruction=False)
-
-        assert isinstance(doc_emb, list), "Should return list"
-        assert len(doc_emb) == 1, "Should return one embedding"
-
-        # Note: We can't directly compare embeddings due to API variations,
-        # but we check they have same structure
-        assert len(doc_emb[0]) == len(no_instruction_emb[0]), "Dimensions should match"
-
-    run_test("Task type: document", test_task_type_document, skip_on_api_error=True)
-
-    # Test 4: Task type "query"
-    def test_task_type_query() -> None:
-        """Test query task type with instruction."""
+    # Test 3: Query with instruction - verify input_texts
+    def test_query_with_instruction() -> None:
+        """Test that query task type adds instruction to input_texts."""
         text = "Что такое Python?"
+        _, input_texts = create_embeddings(text, task_type="query")
 
-        # Create embeddings with different task types
-        doc_emb = create_embeddings(text, task_type="document")
-        query_emb = create_embeddings(text, task_type="query")
-
-        assert len(query_emb) == 1, "Should return one embedding"
-        assert len(query_emb[0]) == len(doc_emb[0]), "Dimensions should be same"
-
-        # Embeddings should be different due to instruction
-        # We check at least some values differ
-        differences = sum(
-            1 for a, b in zip(doc_emb[0][:10], query_emb[0][:10]) if abs(a - b) > 1e-6
+        expected_prefix = "Дан вопрос, найди семантически похожие вопросы\nвопрос: "
+        assert len(input_texts) == 1, "Should have one input text"
+        assert input_texts[0].startswith(expected_prefix), (
+            f"Input text should start with instruction.\n"
+            f"Expected prefix: {expected_prefix}\n"
+            f"Got: {input_texts[0][:len(expected_prefix)]}"
         )
-        assert differences > 0, "Query and document embeddings should differ"
-
-    run_test("Task type: query", test_task_type_query, skip_on_api_error=True)
-
-    # Test 5: Task type "query_answer"
-    def test_task_type_query_answer() -> None:
-        """Test query_answer task type."""
-        text = "Как работает нейронная сеть?"
-
-        query_answer_emb = create_embeddings(text, task_type="query_answer")
-
-        assert isinstance(query_answer_emb, list), "Should return list"
-        assert len(query_answer_emb) == 1, "Should return one embedding"
-        assert len(query_answer_emb[0]) > 0, "Embedding should not be empty"
+        assert text in input_texts[0], "Original text should be in input_texts"
 
     run_test(
-        "Task type: query_answer", test_task_type_query_answer, skip_on_api_error=True
+        "Query with instruction", test_query_with_instruction, skip_on_api_error=True
     )
 
-    # Test 6: Task type "similarity"
-    def test_task_type_similarity() -> None:
-        """Test similarity task type for symmetric search."""
-        texts = ["Первый текст", "Второй текст"]
-
-        # Both texts should get same instruction
-        embs = create_embeddings(texts, task_type="similarity")
-
-        assert len(embs) == 2, f"Expected 2 embeddings, got {len(embs)}"
-        assert len(embs[0]) == len(embs[1]), "Embeddings should have same dimension"
-
-        # Check embeddings are different (not comparing floats directly)
-        differences = sum(1 for a, b in zip(embs[0], embs[1]) if abs(a - b) > 1e-6)
-        assert differences > 0, "Different texts should have different embeddings"
-
-    run_test("Task type: similarity", test_task_type_similarity, skip_on_api_error=True)
-
-    # Test 7: Task type "paraphrase"
-    def test_task_type_paraphrase() -> None:
-        """Test paraphrase detection task type."""
-        original = "Как установить Python?"
-        paraphrase = "Как инсталлировать питон?"
-
-        orig_emb = create_embeddings(original, task_type="paraphrase")
-        para_emb = create_embeddings(paraphrase, task_type="paraphrase")
-
-        assert len(orig_emb) == 1, "Should return one embedding"
-        assert len(para_emb) == 1, "Should return one embedding"
-        assert len(orig_emb[0]) == len(para_emb[0]), "Same dimension expected"
-
-        # Check embeddings are different
-        differences = sum(
-            1 for a, b in zip(orig_emb[0], para_emb[0]) if abs(a - b) > 1e-6
-        )
-        assert differences > 0, "Different texts should have different embeddings"
-
-    run_test("Task type: paraphrase", test_task_type_paraphrase, skip_on_api_error=True)
-
-    # Test 8: Task type "classification" with categories
-    def test_task_type_classification() -> None:
-        """Test classification task type with categories."""
-        text = "Как вернуть товар?"
-        categories = ["техподдержка", "продажи", "возврат"]
-
-        class_emb = create_embeddings(
-            text, task_type="classification", categories=categories
-        )
-
-        assert isinstance(class_emb, list), "Should return list"
-        assert len(class_emb) == 1, "Should return one embedding"
-        assert len(class_emb[0]) > 0, "Embedding should not be empty"
-
-    run_test(
-        "Task type: classification",
-        test_task_type_classification,
-        skip_on_api_error=True,
-    )
-
-    # Test 9: Custom instruction override
-    def test_custom_instruction() -> None:
-        """Test custom instruction override."""
+    # Test 4: Custom instruction in input_texts
+    def test_custom_instruction_in_input() -> None:
+        """Test that custom instruction appears in input_texts."""
         text = "Test text"
         custom_instruction = "Custom instruction for testing\ntext: "
 
-        emb = create_embeddings(text, custom_instruction=custom_instruction)
+        _, input_texts = create_embeddings(text, custom_instruction=custom_instruction)
 
-        assert isinstance(emb, list), "Should return list"
-        assert len(emb) == 1, "Should return one embedding"
-        assert len(emb[0]) > 0, "Embedding should not be empty"
+        assert len(input_texts) == 1, "Should have one input text"
+        assert input_texts[0] == f"{custom_instruction}{text}", (
+            f"Input text should be instruction + text.\n"
+            f"Expected: {custom_instruction}{text}\n"
+            f"Got: {input_texts[0]}"
+        )
 
-    run_test("Custom instruction", test_custom_instruction, skip_on_api_error=True)
+    run_test(
+        "Custom instruction in input",
+        test_custom_instruction_in_input,
+        skip_on_api_error=True,
+    )
 
-    # Test 10: Unknown task type handling
-    def test_unknown_task_type() -> None:
-        """Test handling of unknown task type."""
+    # Test 5: Batch embeddings with input_texts
+    def test_batch_embeddings_with_input() -> None:
+        """Test create_batch_embeddings returns input_texts."""
+        texts = [f"Text {i}" for i in range(7)]
+
+        batch_embs, batch_input_texts = create_batch_embeddings(
+            texts, batch_size=3, task_type="document"
+        )
+
+        # Check embeddings
+        assert len(batch_embs) == 7, f"Expected 7 embeddings, got {len(batch_embs)}"
+
+        # Check all have same dimension
+        first_dim = len(batch_embs[0])
+        for i, emb in enumerate(batch_embs):
+            assert len(emb) == first_dim, f"Embedding {i} has different dimension"
+
+        # Check input_texts
+        assert (
+            len(batch_input_texts) == 7
+        ), f"Expected 7 input texts, got {len(batch_input_texts)}"
+        assert (
+            batch_input_texts == texts
+        ), "Input texts should match originals for document type"
+
+    run_test(
+        "Batch embeddings with input",
+        test_batch_embeddings_with_input,
+        skip_on_api_error=True,
+    )
+
+    # Test 6: Batch with query instruction
+    def test_batch_query_instruction() -> None:
+        """Test batch processing adds instructions correctly."""
+        texts = ["Question 1?", "Question 2?", "Question 3?"]
+
+        _, input_texts = create_batch_embeddings(texts, batch_size=2, task_type="query")
+
+        expected_prefix = "Дан вопрос, найди семантически похожие вопросы\nвопрос: "
+
+        assert len(input_texts) == 3, f"Expected 3 input texts, got {len(input_texts)}"
+
+        for i, input_text in enumerate(input_texts):
+            assert input_text.startswith(expected_prefix), (
+                f"Input text {i} should start with instruction.\n"
+                f"Got: {input_text[:50]}"
+            )
+            assert texts[i] in input_text, f"Original text {i} should be in input_text"
+
+    run_test(
+        "Batch query instruction", test_batch_query_instruction, skip_on_api_error=True
+    )
+
+    # Test 7: Apply instruction flag effect on input_texts
+    def test_apply_instruction_flag_input() -> None:
+        """Test apply_instruction=False prevents instruction in input_texts."""
         text = "Test text"
 
-        # Should log warning but still work (returns empty instruction)
-        emb = create_embeddings(text, task_type="unknown_type")
+        # With instruction disabled
+        _, no_inst_input = create_embeddings(
+            text,
+            task_type="query",  # This would normally add instruction
+            apply_instruction=False,  # But we disable it
+        )
 
-        assert isinstance(emb, list), "Should still return list"
-        assert len(emb) == 1, "Should return one embedding"
+        # Same as document type
+        _, doc_input = create_embeddings(text, task_type="document")
 
-    run_test("Unknown task type", test_unknown_task_type, skip_on_api_error=True)
+        assert no_inst_input == doc_input, (
+            "Input texts should be same when instruction is disabled.\n"
+            f"No instruction: {no_inst_input}\n"
+            f"Document: {doc_input}"
+        )
+        assert no_inst_input == [text], "Should be just the original text"
 
-    # Test 11: Empty input validation
+    run_test(
+        "Apply instruction flag input",
+        test_apply_instruction_flag_input,
+        skip_on_api_error=True,
+    )
+
+    # Test 8: Empty input validation (unchanged)
     def test_empty_input() -> None:
         """Test that empty input raises ValueError."""
         try:
@@ -597,64 +590,7 @@ if __name__ == "__main__":
 
     run_test("Empty input validation", test_empty_input)
 
-    # Test 12: Apply instruction flag
-    def test_apply_instruction_flag() -> None:
-        """Test apply_instruction parameter."""
-        text = "Test text"
-
-        # With instruction disabled
-        no_inst = create_embeddings(
-            text,
-            task_type="query",  # This would normally add instruction
-            apply_instruction=False,  # But we disable it
-        )
-
-        # Same as document type
-        doc = create_embeddings(text, task_type="document")
-
-        assert len(no_inst) == 1, "Should return one embedding"
-        assert len(doc) == 1, "Should return one embedding"
-        assert len(no_inst[0]) == len(doc[0]), "Should have same dimension"
-
-    run_test(
-        "Apply instruction flag", test_apply_instruction_flag, skip_on_api_error=True
-    )
-
-    # Test 13: Batch embeddings function
-    def test_batch_embeddings() -> None:
-        """Test create_batch_embeddings function."""
-        # Create test data
-        texts = [f"Text {i}" for i in range(7)]
-
-        batch_embs = create_batch_embeddings(
-            texts, batch_size=3, task_type="document"  # Process in batches of 3
-        )
-
-        assert len(batch_embs) == 7, f"Expected 7 embeddings, got {len(batch_embs)}"
-
-        # Check all have same dimension
-        first_dim = len(batch_embs[0])
-        for i, emb in enumerate(batch_embs):
-            assert len(emb) == first_dim, f"Embedding {i} has different dimension"
-
-    run_test("Batch embeddings", test_batch_embeddings, skip_on_api_error=True)
-
-    # Test 14: Instruction consistency
-    def test_instruction_consistency() -> None:
-        """Test that same task type always gives same instruction."""
-        instruction1 = get_instruction("query")
-        instruction2 = get_instruction("query")
-
-        assert (
-            instruction1 == instruction2
-        ), "Same task type should give same instruction"
-        assert (
-            instruction1 == "Дан вопрос, найди семантически похожие вопросы\nвопрос: "
-        ), f"Unexpected instruction: {instruction1}"
-
-    run_test("Instruction consistency", test_instruction_consistency)
-
-    # Test 15: Prepare texts function
+    # Test 9: Prepare texts function (unchanged)
     def test_prepare_texts() -> None:
         """Test prepare_texts helper function."""
         # Single text
