@@ -42,10 +42,10 @@
            - колонки
              - **Категория** — категории из `QA_YYYY-MM-DD_HHMMSS.QA`
              - **Вопрос** — вопросы из `QA_YYYY-MM-DD_HHMMSS.QA`
-             - **category** — заполняется из `JSON`, который возвращает `prompts.define_category_prompt.run()`
-             - **confidence** — заполняется из `JSON`, который возвращает `prompts.define_category_prompt.run()`
-             - **reasoning** — заполняется из `JSON`, который возвращает `prompts.define_category_prompt.run()`
-             - **messages** — заполняется из `tuple` после выполнения `prompts.define_category_prompt.run()`
+             - **category** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
+             - **confidence** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
+             - **reasoning** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
+             - **messages** — заполняется из `messages_list`, который возвращает `prompts.define_category_prompt.run()`
        - Запоминает обработанную строку из `QA_YYYY-MM-DD_HHMMSS.QA`, чтобы при повторном старте после сбоя `gigachat.client` начать со следующей строки
 
 3. **Проверка результатов**
@@ -169,16 +169,19 @@
        - **answer** — заполняется из `JSON` после выполнения `prompts.get_answer_prompt.run()`
        - **q_1** — первый вопрос из `N` найденных заполняется из `db.duckdb_qa_store.search_similar_questions()`
        - **a_1** — первый ответ из `N` найденных заполняется из `db.duckdb_qa_store.search_similar_questions()`
-       - далее `N-1` повторений **q_1** + **a_1**
+       - далее `N-1` повторений **q_n** + **a_n**
      - Формирует строку на листе `Q_YYYY-MM-DD_HHMMSS.LOG_ANSWER` с информацией для контроля над процессом формирования ответа `gigachat.client`, если `log_answer == True`
        - положение каждой строки лога соответствует положению обрабатываемой строки на листе `Q_YYYY-MM-DD_HHMMSS.Q`
        - колонки
          - **Вопрос** — вопросы из `Q_YYYY-MM-DD_HHMMSS.Q`
-         - **category** — заполняется из `JSON`, который возвращает `prompts.define_category_prompt.run()`
-         - **confidence** — заполняется из `JSON`, который возвращает `prompts.define_category_prompt.run()`
-         - **reasoning** — заполняется из `JSON`, который возвращает `prompts.define_category_prompt.run()`
-         - **messages_category** — заполняется из `tuple` после выполнения `prompts.define_category_prompt.run()`
-         - **messages_answer** — заполняется из `tuple` после выполнения `prompts.get_answer_prompt.run()`
+         - **category** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
+         - **confidence** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
+         - **reasoning** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
+         - **messages_category** — заполняется из `messages_list`, который возвращает `prompts.define_category_prompt.run()`
+         - **answer** — заполняется из `result_json`, который возвращает `prompts.get_answer_prompt.run()`
+         - **confidence** — заполняется из `result_json`, который возвращает `prompts.get_answer_prompt.run()`
+         - **sources_used** — заполняется из `result_json`, который возвращает `prompts.get_answer_prompt.run()`
+         - **messages_answer** — заполняется из `messages_list`, который возвращает `prompts.get_answer_prompt.run()`
      - Запоминает обработанную строку из `Q_YYYY-MM-DD_HHMMSS.Q`, чтобы при повторном старте после сбоя `gigachat.client` начать со следующей строки
 
    - **Логирование**
