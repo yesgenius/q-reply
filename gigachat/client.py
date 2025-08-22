@@ -5,6 +5,23 @@ supporting both mTLS (certificate-based) and Basic authentication modes.
 
 Usage:
     python -m gigachat.client
+
+Models list:
+- Embeddings: embedder
+- Embeddings-2: embedder
+- EmbeddingsGigaR: embedder
+- GigaChat: chat
+- GigaChat-2: chat
+- GigaChat-2-Max: chat
+- GigaChat-2-Pro: chat
+- GigaChat-Max: chat
+- GigaChat-Max-preview: chat
+- GigaChat-Plus: chat
+- GigaChat-Plus-preview: chat
+- GigaChat-preview: chat
+- GigaChat-Pro: chat
+- GigaChat-Pro-preview: chat
+
 """
 
 import json

@@ -57,12 +57,13 @@ llm = GigaChatClient()
 
 # Model parameters optimized for answer generation
 params: Dict[str, Any] = {
-    "model": "GigaChat",
-    "temperature": 0.3,  # Balanced for informative yet creative answers
-    "top_p": 0.95,
+    "model": "GigaChat-2-Pro",
+    # "model": "GigaChat",
+    # "temperature": 0.3,  # Balanced for informative yet creative answers
+    # "top_p": 0.95,
     "stream": False,
     "max_tokens": 1000,  # Sufficient for comprehensive answers
-    "repetition_penalty": 1.1,
+    # "repetition_penalty": 1.1,
 }
 
 # Global cached variables
@@ -186,25 +187,21 @@ You MUST respond with ONLY a valid JSON object in this exact format:
 }
 
 Field definitions:
-- "answer": Your complete response to the question (required)
-- "confidence": Float between 0.0 and 1.0 indicating answer quality (optional)
-- "sources_used": Array indicating information sources (optional):
-  * Include "context" if you used ANY information from the provided Q&A pairs
-  * Include "domain_knowledge" if you used ANY of your general knowledge
-  * Use ["context"] when answer is based ONLY on provided Q&A pairs
-  * Use ["domain_knowledge"] when answer is based ONLY on your knowledge
-  * Use ["context", "domain_knowledge"] when combining both sources
+- "answer": Must be Your complete response to the question;
+- "confidence": Must be a float between 0 and 1, indicating how confident the model is in the correctness of its answer to the question;
+- "sources_used": Array indicating information sources:
+  * Include "context" if you used ANY information from the provided Q&A pairs;
+  * Include "domain_knowledge" if you used ANY of your general knowledge;
+  * Use ["context"] when answer is based ONLY on provided Q&A pairs;
+  * Use ["domain_knowledge"] when answer is based ONLY on your knowledge;
+  * Use ["context", "domain_knowledge"] when combining both sources.
 
 CRITICAL JSON RULES:
-- NEVER use triple quotes in JSON
-- NEVER use raw line breaks inside string values
-- Use \\n for line breaks within strings
-- All strings must be enclosed in single double quotes (")
-- The entire response must be valid JSON that can be parsed by json.loads()
-- Do not include any text, markdown, or explanations outside the JSON object
-
-Example of CORRECT format:
-{"answer": "Based on the context\\nHere is my answer", "confidence": 0.9, "sources_used": ["context"]}"""
+- NEVER use triple quotes in JSON;
+- NEVER use raw line breaks inside string values;
+- All strings must be enclosed in single double quotes (");
+- The entire response must be valid JSON that can be parsed by json.loads();
+- Do not include any text, markdown, or explanations outside the JSON object; """
 
     prompt = base_prompt + topic_context + instructions
 

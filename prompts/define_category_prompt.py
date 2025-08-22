@@ -47,12 +47,13 @@ llm = GigaChatClient()
 
 # Model parameters optimized for structured output
 params: Dict[str, Any] = {
-    "model": "GigaChat",
-    "temperature": 0.1,  # Low temperature for consistent categorization
-    "top_p": 0.95,
+    "model": "GigaChat-2-Pro",
+    # "model": "GigaChat",
+    # "temperature": 0.1,  # Low temperature for consistent categorization
+    # "top_p": 0.95,
     "stream": False,
     "max_tokens": 300,  # Sufficient for JSON with reasoning
-    "repetition_penalty": 1.0,
+    # "repetition_penalty": 1.0,
 }
 
 # Global cached variables
@@ -160,12 +161,17 @@ You MUST respond with ONLY a valid JSON object in this exact format:
     "reasoning": "Brief explanation of why this category was chosen"
 }}
 
-Rules:
-- The category MUST be one of: {', '.join(categories.keys())};
-- Confidence must be a float between 0 and 1, indicating how well the question matches the category;
-- Reasoning should be 1-2 sentences maximum;
-- Do not include any text outside the JSON object;
-- Ensure the JSON is valid and properly formatted."""
+Field definitions:
+- "category": Must be one of: {', '.join(categories.keys())};
+- "confidence": Must be a float between 0 and 1, indicating how confident the model is in the correctness of the chosen category;
+- "reasoning": Must be a brief explanation (1-2 sentences maximum) of why this category was chosen;
+
+CRITICAL JSON RULES:
+- NEVER use triple quotes in JSON;
+- NEVER use raw line breaks inside string values;
+- All strings must be enclosed in single double quotes (");
+- The entire response must be valid JSON that can be parsed by json.loads();
+- Do not include any text, markdown, or explanations outside the JSON object."""
 
     return prompt
 

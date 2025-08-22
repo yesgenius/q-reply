@@ -23,7 +23,7 @@ import numpy as np
 # Public constants (keep small, explicit surface)
 # ---------------------------------------------------------------------------
 
-DEFAULT_EMBEDDING_SIZE = 1024
+DEFAULT_EMBEDDING_SIZE = 2560
 DEFAULT_SIMILARITY_THRESHOLD = 0.15
 DEFAULT_TOP_K = 5
 

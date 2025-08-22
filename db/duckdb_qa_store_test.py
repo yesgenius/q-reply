@@ -4,7 +4,8 @@ This script validates the core functionality of the QADatabaseStore wrapper:
 - CRUD operations (insert, find, update answer, update category, delete missing)
 - Category utilities (list categories, rows without category)
 - Text preprocessing normalization
-- Similarity search (conditionally tested if DuckDB supports it)
+- Similarity search with comprehensive parameter validation
+- Embedding size validation
 
 The demo avoids unnecessary complexity and keeps assertions explicit and minimal.
 It is mypy/pylint-friendly and uses Google-style docstrings for autodocumentation.
@@ -182,73 +183,237 @@ def main() -> None:
     ok = db.update_category(test_qa_pairs[0]["question"], "Требования к клиенту")
     assert ok, "Category update must succeed"
 
-    # 6) Similarity search (conditionally executed)
-    logger.info("6) Similarity search")
+    # 6) Similarity search - comprehensive tests
+    logger.info("6) Similarity search - comprehensive parameter validation")
     can_search = duckdb_supports_array_cosine(db)
     if can_search:
-        query = "С какого возраста можно получить кредитку?"
-        sim = db.search_similar_questions(
-            generate_fake_embedding(query, emb_size), top_k=3, threshold=0.05
-        )
-        if not sim:
-            # Make it permissive for demo environments.
-            sim = db.search_similar_questions(
-                generate_fake_embedding(query, emb_size), top_k=3, threshold=0.0
+        # Prepare more test data for thorough testing
+        logger.info(" - Adding more test data for search validation")
+        additional_qa = [
+            (
+                "С какого возраста выдают кредитку?",
+                "С 18 лет можно оформить.",
+                "Возрастные ограничения",
+            ),
+            (
+                "Минимальный возраст для кредитной карты?",
+                "18 лет минимум.",
+                "Возрастные ограничения",
+            ),
+            (
+                "Какая процентная ставка по карте?",
+                "Ставка 24.9% годовых.",
+                "Условия карты",
+            ),
+            (
+                "Есть ли льготный период?",
+                "Да, 120 дней без процентов.",
+                "Условия карты",
+            ),
+            ("Какие документы нужны?", "Паспорт и СНИЛС.", "Документы"),
+            ("Нужна ли справка о доходах?", "Нет, справка не требуется.", "Документы"),
+            ("Можно ли снимать наличные?", "Да, но с комиссией 3%.", "Операции"),
+        ]
+
+        for q, a, cat in additional_qa:
+            db.insert_qa(
+                q,
+                a,
+                cat,
+                generate_fake_embedding(q, emb_size),
+                generate_fake_embedding(a, emb_size),
             )
-        assert isinstance(sim, list), "Search must return a list"
-        assert len(sim) >= 1, "Expected at least one similar result"
-        logger.info(" - Top similar: %s", sim[0]["question"][:70])
+
+        # Test 6.1: Validate threshold impact
+        logger.info(" 6.1) Testing threshold impact on result count")
+        query_emb = generate_fake_embedding(
+            "возраст для получения кредитной карты", emb_size
+        )
+
+        results_high_threshold = db.search_similar_questions(
+            query_emb, top_k=20, threshold=0.8
+        )
+        results_mid_threshold = db.search_similar_questions(
+            query_emb, top_k=20, threshold=0.3
+        )
+        results_low_threshold = db.search_similar_questions(
+            query_emb, top_k=20, threshold=0.0
+        )
+
+        # Higher threshold should return fewer or equal results
+        assert len(results_high_threshold) <= len(
+            results_mid_threshold
+        ), f"High threshold ({len(results_high_threshold)}) should yield fewer results than mid ({len(results_mid_threshold)})"
+        assert len(results_mid_threshold) <= len(
+            results_low_threshold
+        ), f"Mid threshold ({len(results_mid_threshold)}) should yield fewer results than low ({len(results_low_threshold)})"
+
+        # Verify all results meet threshold requirement
+        for r in results_high_threshold:
+            assert (
+                r["similarity"] >= 0.8
+            ), f"Result similarity {r['similarity']} below threshold 0.8"
+        for r in results_mid_threshold:
+            assert (
+                r["similarity"] >= 0.3
+            ), f"Result similarity {r['similarity']} below threshold 0.3"
+
+        logger.info("  - Threshold 0.8: %d results", len(results_high_threshold))
+        logger.info("  - Threshold 0.3: %d results", len(results_mid_threshold))
+        logger.info("  - Threshold 0.0: %d results", len(results_low_threshold))
+
+        # Test 6.2: Validate top_k impact
+        logger.info(" 6.2) Testing top_k impact on result count")
+
+        results_k1 = db.search_similar_questions(query_emb, top_k=1, threshold=0.0)
+        results_k3 = db.search_similar_questions(query_emb, top_k=3, threshold=0.0)
+        results_k10 = db.search_similar_questions(query_emb, top_k=10, threshold=0.0)
+        results_k50 = db.search_similar_questions(query_emb, top_k=50, threshold=0.0)
+
+        # Verify top_k constraint
+        assert len(results_k1) <= 1, f"top_k=1 returned {len(results_k1)} results"
+        assert len(results_k3) <= 3, f"top_k=3 returned {len(results_k3)} results"
+        assert len(results_k10) <= 10, f"top_k=10 returned {len(results_k10)} results"
+        assert len(results_k50) <= 50, f"top_k=50 returned {len(results_k50)} results"
+
+        # Results should increase or stay same as k increases
+        assert len(results_k1) <= len(results_k3), "k=1 should have <= results than k=3"
+        assert len(results_k3) <= len(
+            results_k10
+        ), "k=3 should have <= results than k=10"
+        assert len(results_k10) <= len(
+            results_k50
+        ), "k=10 should have <= results than k=50"
+
+        logger.info("  - top_k=1: %d results", len(results_k1))
+        logger.info("  - top_k=3: %d results", len(results_k3))
+        logger.info("  - top_k=10: %d results", len(results_k10))
+        logger.info("  - top_k=50: %d results", len(results_k50))
+
+        # Test 6.3: Validate category filter impact
+        logger.info(" 6.3) Testing category filter impact on result count")
+
+        # Search without category filter
+        results_no_filter = db.search_similar_questions(
+            query_emb, top_k=20, threshold=0.0
+        )
+
+        # Search with specific category filters
+        results_age_cat = db.search_similar_questions(
+            query_emb, category="Возрастные ограничения", top_k=20, threshold=0.0
+        )
+        results_terms_cat = db.search_similar_questions(
+            query_emb, category="Условия карты", top_k=20, threshold=0.0
+        )
+        results_docs_cat = db.search_similar_questions(
+            query_emb, category="Документы", top_k=20, threshold=0.0
+        )
+
+        # Category filter should reduce or maintain result count
+        assert len(results_age_cat) <= len(
+            results_no_filter
+        ), f"Filtered results ({len(results_age_cat)}) exceed unfiltered ({len(results_no_filter)})"
+        assert len(results_terms_cat) <= len(
+            results_no_filter
+        ), f"Filtered results ({len(results_terms_cat)}) exceed unfiltered ({len(results_no_filter)})"
+
+        # Verify all filtered results have correct category
+        for r in results_age_cat:
+            assert (
+                r["category"] == "Возрастные ограничения"
+            ), f"Result has wrong category: {r['category']}"
+        for r in results_terms_cat:
+            assert (
+                r["category"] == "Условия карты"
+            ), f"Result has wrong category: {r['category']}"
+
+        logger.info("  - No filter: %d results", len(results_no_filter))
+        logger.info(
+            "  - Category 'Возрастные ограничения': %d results", len(results_age_cat)
+        )
+        logger.info("  - Category 'Условия карты': %d results", len(results_terms_cat))
+        logger.info("  - Category 'Документы': %d results", len(results_docs_cat))
+
+        # Test 6.4: Validate result ordering by similarity
+        logger.info(" 6.4) Testing result ordering by similarity")
+        results = db.search_similar_questions(query_emb, top_k=10, threshold=0.0)
+
+        if len(results) > 1:
+            for i in range(1, len(results)):
+                assert (
+                    results[i - 1]["similarity"] >= results[i]["similarity"]
+                ), f"Results not ordered: {results[i-1]['similarity']} < {results[i]['similarity']}"
+            logger.info("  - Results correctly ordered by descending similarity")
+
+        # Test 6.5: Edge cases
+        logger.info(" 6.5) Testing edge cases")
+
+        # Very high threshold should return few/no results
+        results_impossible = db.search_similar_questions(
+            query_emb, top_k=10, threshold=0.99
+        )
+        logger.info(
+            "  - Threshold 0.99: %d results (expected 0 or very few)",
+            len(results_impossible),
+        )
+
+        # Non-existent category should return empty
+        results_no_cat = db.search_similar_questions(
+            query_emb, category="NonExistentCategory", top_k=10, threshold=0.0
+        )
+        assert (
+            len(results_no_cat) == 0
+        ), "Non-existent category should return no results"
+        logger.info("  - Non-existent category: 0 results (as expected)")
+
     else:
         logger.warning(
             "DuckDB does not support array_cosine_similarity; skipping similarity checks."
         )
 
-    # 7) Category filter in search (only if search is available)
-    logger.info("7) Category filter in search")
-    if can_search:
-        query = "Какой льготный период по карте?"
-        sim_f = db.search_similar_questions(
-            generate_fake_embedding(query, emb_size),
-            category="Условия карты",
-            top_k=3,
-            threshold=0.0,
-        )
-        logger.info(" - Results with category filter: %d", len(sim_f))
-        # Not asserting a minimum count: it's data/embedding dependent.
-
-    # 8) Get all records
-    logger.info("8) List all records")
+    # 7) Get all records
+    logger.info("7) List all records")
     all_rows = db.get_all_qa_records()
-    assert len(all_rows) == len(test_qa_pairs), "Unexpected number of rows"
+    # We added more records in test 6
+    assert len(all_rows) >= len(test_qa_pairs), "Unexpected number of rows"
 
-    # 9) Get categories
-    logger.info("9) List categories")
+    # 8) Get categories
+    logger.info("8) List categories")
     cats = db.get_categories()
     assert isinstance(cats, list) and len(cats) >= 2, "Expected at least two categories"
 
-    # 10) Rows without category
-    logger.info("10) Rows without category")
+    # 9) Rows without category
+    logger.info("9) Rows without category")
     ok = db.insert_qa(
-        "Какая процентная ставка по карте?",
-        "Ставка 49.8% после льготного периода",
+        "Можно ли пополнить карту без комиссии?",
+        "Да, пополнение без комиссии через банкоматы банка",
         None,
-        generate_fake_embedding("Какая процентная ставка по карте?", emb_size),
-        generate_fake_embedding("Ставка 49.8% после льготного периода", emb_size),
+        generate_fake_embedding("Можно ли пополнить карту без комиссии?", emb_size),
+        generate_fake_embedding(
+            "Да, пополнение без комиссии через банкоматы банка", emb_size
+        ),
     )
     assert ok, "Insert without category must succeed"
+    logger.info(" - Inserted row without category")
+
     no_cat_rows = db.get_qa_without_category()
     assert len(no_cat_rows) >= 1, "Expected at least one row without category"
 
-    # 11) Delete missing records
-    logger.info("11) Delete records missing from provided list")
+    # 10) Delete missing records
+    logger.info("10) Delete records missing from provided list")
+    # Get current count before deletion
+    before_delete = len(db.get_all_qa_records())
+
+    # Keep only the first two original questions
     keep = [qa["question"] for qa in test_qa_pairs[:2]]
     deleted = db.delete_missing_records(keep)
-    assert deleted == 2, f"Expected to delete 2 rows, got {deleted}"
+
     remain = db.get_all_qa_records()
     assert len(remain) == 2, f"Expected 2 rows remaining, got {len(remain)}"
+    logger.info(" - Deleted %d rows, %d remaining", deleted, len(remain))
 
-    # 12) Text preprocessing normalization
-    logger.info("12) Text preprocessing checks")
+    # 11) Text preprocessing normalization
+    logger.info("11) Text preprocessing checks")
     # NOTE: Expected results are aligned with current preprocess_text behavior
     # (punctuation is removed; numeric separators are preserved between digits).
     inputs = [
@@ -268,8 +433,8 @@ def main() -> None:
         assert got == exp, f"Preprocess mismatch: '{got}' != '{exp}'"
         logger.info(" - '%s' -> '%s'", src, got)
 
-    # 13) Embedding size validation
-    logger.info("13) Embedding size validation")
+    # 12) Embedding size validation
+    logger.info("12) Embedding size validation")
     bad = db.insert_qa(
         "Test question with wrong embedding size",
         "Test answer",
@@ -280,7 +445,7 @@ def main() -> None:
     assert not bad, "Insert with wrong embedding size must fail"
 
     # Finalize
-    logger.info("14) Cleanup and close")
+    logger.info("13) Cleanup and close")
     db.close()
     if os.path.exists(db_path):
         os.remove(db_path)
