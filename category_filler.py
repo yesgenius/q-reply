@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """Question category filler script with answer context support.
 
 This script automatically fills question categories using GigaChat LLM
