@@ -258,11 +258,13 @@ q-reply/
 │       └── Лист "LOG_ANSWER"              # Лог с информацией для контроля над процессом формирования ответа gigachat.client 
 │
 ├── gigachat/                              # ОБЕРТКА REST API LLM
+│   ├── README.md
 │   ├── __init__.py
 │   ├── config.py                          # Загрузка .env
 │   └── client.py                          # класс GigaChatClient с методами для получения: ответов, эмбеддингов, списка моделей
 │
 ├── prompts/                               # ПАКЕТ КАСТОМНЫХ ПРОМТОВ С ФУНКЦИЕЙ ПОЛУЧЕНИЯ ОТВЕТА ОТ LLM
+│   ├── README.md
 │   ├── __init__.py
 │   ├── base_prompt.py                     # Пример модуля промта с вариантами и заглушками 
 │   ├── define_category_prompt.py          # модуль промта для выделения категорий, доработанная копия base_prompt.py
@@ -272,19 +274,29 @@ q-reply/
 │   └── ...
 │
 ├── embeddings/                            # ПАКЕТ КАСТОМНЫХ ЭМБИДДЕРОВ
+│   ├── README.md
 │   ├── __init__.py
 │   ├── base_embedding.py                  # модуль с базовыми функциями с инструкциями для модели, для получения эмбеддингов
 │   └── ...
 │
 ├── db/                                    # ПАКЕТ КАСТОМНЫХ ОБЕРТОК ДЛЯ БД
+│   ├── README.md
 │   ├── __init__.py
 │   ├── duckdb_qa_store.py                 # модуль с классом QADatabaseStore и базовыми методами для реализации проекта
+│   ├── duckdb_qa_store_test.py            # модуль тестирования duckdb_qa_store.py
 │   └── ...
+│
+├── qa.duckdb                              # База данных
+│
+├── docs/
+│   ├── README.md
+│   └── Q-REPLY_REQ.md
 │
 ├── category_filler.py                     # Определение категорий исторических вопросов
 ├── update_db.py                           # Формирование БД (DuckDB)
 ├── answer_generator.py                    # Ответы на текущие вопросы
 │
+├──  requirements.txt                      # Зависимости
 ├── .env                                   # Секретные переменные
 └── certs/                                 # TLS СЕРТИФИКАТЫ
 ```

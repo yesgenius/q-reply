@@ -22,6 +22,21 @@ Models list:
 - GigaChat-Pro: chat
 - GigaChat-Pro-preview: chat
 
+Models list in contur:
+- Embeddings: embedder
+- Embeddings-2: embedder
+- EmbeddingsGigaR: embedder
+- GigaChat: chat
+- GigaChat-2: chat
+- GigaChat-2-Max: chat
+- GigaChat-2-Pro: chat
+- GigaChat-Max: chat
+- GigaChat-Pro: chat
+- SaluteEmbeddings: embedder
+- SaluteEmbeddings_AB: embedder
+- SaluteV5Embeddings: embedder
+- SaluteV5Embeddings_AB: embedder
+
 """
 
 import json
