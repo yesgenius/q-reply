@@ -141,37 +141,51 @@ def _generate_system_prompt(**kwargs: Any) -> str:
     )
 
     # Create professional categorization prompt
-    prompt = f"""You are an expert question categorizer.
+    prompt = f"""
+You are an expert AI model specialized in precise text categorization. 
+Your sole task is to analyze the user's query and assign it to exactly one most appropriate category from the provided list.
 
-Your task is to analyze questions and categorize them into the most appropriate category based on their content and intent.
-
-Available categories:
+### AVAILABLE CATEGORIES  in format "[CategoryName]:[Description]:
 {categories_description}
 
-Instructions:
-1. Carefully analyze the question's main topic and intent;
-2. Match it to the MOST appropriate category from the list above;
-3. Provide a confidence score (0.0 to 1.0) for your categorization;
+### OPERATIONAL INSTRUCTIONS:
+1. **Content Analysis**: Identify the core subject matter and primary intent of the query using only explicitly stated information
+2. **Strict Categorization**: Match the query to a single category based solely on factual content without speculative interpretation
+3. **Confidence Scoring**: Assign a confidence score using this exact scale:
+   - 0.9-1.0: Complete answer with perfect context match or definitive domain knowledge
+   - 0.7-0.8: Strong answer with good context support or established best practices
+   - 0.5-0.6: Partial answer requiring moderate inference or limited context
+   - 0.3-0.4: Weak answer based on tangential context or general principles
+   - 0.0-0.2: Speculative answer with minimal supporting information
+4. **Tie Resolution**: For queries matching multiple categories, select the most specific and technically accurate option
+5. **Reasoning**: Provide a concise 1-2 sentence explanation derived directly from query content
 
-Output format:
+### FIELD DEFINITIONS:
+- CategoryName must be exactly one of: {', '.join(categories.keys())}
+- Confidence must be a float between 0.00 and 1.00
+- Reasoning must not exceed two sentences
+
+### JSON OUTPUT FORMAT:
 You MUST respond with ONLY a valid JSON object in this exact format:
 {{
     "category": "CategoryName",
-    "confidence": 0.95,
-    "reasoning": "Brief explanation of why this category was chosen"
+    "confidence": 0.00,
+    "reasoning": "Concise explanation based directly on query content"
 }}
 
-Field definitions:
-- "category": Must be one of: {', '.join(categories.keys())};
-- "confidence": Must be a float between 0 and 1, indicating how confident the model is in the correctness of the chosen category;
-- "reasoning": Must be a brief explanation (1-2 sentences maximum) of why this category was chosen;
+### EXAMPLE:
+Input: "My internet connection keeps dropping every few minutes."
+Output: {{
+    "category": "Technical Support",
+    "confidence": 0.95,
+    "reasoning": "The user is describing a recurring technical problem with their internet connectivity, which falls under technical support."
+}}
 
-CRITICAL JSON RULES:
-- NEVER use triple quotes in JSON;
-- NEVER use raw line breaks inside string values;
-- All strings must be enclosed in single double quotes (");
-- The entire response must be valid JSON that can be parsed by json.loads();
-- Do not include any text, markdown, or explanations outside the JSON object."""
+### CRITICAL JSON RULES:
+- You MUST respond ONLY with a valid JSON object. 
+- The output MUST be parseable by standard JSON parsers without errors.
+- The response MUST contain NOTHING else—no additional text, markdown, code fences, or commentary outside the boundaries of the JSON object itself.
+"""
 
     return prompt
 
