@@ -50,6 +50,7 @@ OUTPUT_DIR = Path("out")
 SHEET_QA = "QA"
 SHEET_CATEGORY = "CATEGORY"
 SHEET_LOG_PREFIX = "LOG_CATEGORY"
+SHEET_LOG_PARAMS = "LOG_CATEGORY_PARAMS"  # New sheet for model parameters
 
 # Column indices (1-based for openpyxl)
 COL_CATEGORY_NAME = 1  # Column A in CATEGORY sheet
@@ -62,9 +63,12 @@ COL_QA_ANSWER = 3  # Column C in QA sheet
 USE_ANSWER_FOR_CATEGORIZATION = (
     True  # Include answer in categorization for better accuracy
 )
+MAX_RETRY_ATTEMPTS = 5  # Maximum number of retry attempts on error
+RETRY_DELAY = 2  # Delay between retries in seconds (if needed)
 
 # Logging configuration
 LOG_CATEGORY = True  # Set to False to disable category logging sheet
+LOG_TO_FILE = True  # Enable logging to text file
 LOG_LEVEL = logging.INFO
 
 # Processing configuration
@@ -78,11 +82,52 @@ RESUME_FILE = Path(".category_filler_resume.json")  # Hidden file for resume sta
 # END OF CONFIGURATION SECTION
 # ============================================================================
 
-# Configure logging
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]",
-)
+
+class DualLogger:
+    """Logger that writes to both console and file."""
+
+    def __init__(self, log_file: Optional[Path] = None):
+        """Initialize dual logger.
+
+        Args:
+            log_file: Path to log file. If None, only console logging.
+        """
+        self.log_file = log_file
+        self.file_handler = None
+
+        # Configure main logger
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(LOG_LEVEL)
+
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(LOG_LEVEL)
+        formatter = logging.Formatter(
+            "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
+        )
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+
+        # File handler if requested
+        if log_file and LOG_TO_FILE:
+            try:
+                log_file.parent.mkdir(parents=True, exist_ok=True)
+                self.file_handler = logging.FileHandler(log_file, encoding="utf-8")
+                self.file_handler.setLevel(LOG_LEVEL)
+                self.file_handler.setFormatter(formatter)
+                self.logger.addHandler(self.file_handler)
+                self.logger.info(f"Logging to file: {log_file}")
+            except Exception as e:
+                self.logger.warning(f"Could not create log file: {e}")
+
+    def close(self):
+        """Close file handler if exists."""
+        if self.file_handler:
+            self.file_handler.close()
+            self.logger.removeHandler(self.file_handler)
+
+
+# Global logger instance (will be initialized in CategoryFiller)
 logger = logging.getLogger(__name__)
 
 
@@ -97,6 +142,13 @@ class CategoryFiller:
         self.processed_count: int = 0
         self.resume_state: Dict = {}
         self.timestamp: str = ""
+        self.dual_logger: Optional[DualLogger] = None
+
+    def _update_logger(self) -> None:
+        """Update global logger reference when dual logger is available."""
+        global logger
+        if self.dual_logger:
+            logger = self.dual_logger.logger
 
     def validate_input_file(self) -> bool:
         """Validate that input file exists and has required sheets.
@@ -261,6 +313,171 @@ class CategoryFiller:
         logger.info(f"Validated {total_rows} QA rows")
         return rows_to_process
 
+    def create_log_params_sheet(self, wb: Workbook) -> None:
+        """Create or update LOG_CATEGORY_PARAMS sheet with model parameters.
+
+        Args:
+            wb: Workbook to add the sheet to.
+        """
+        if not LOG_CATEGORY:
+            return
+
+        # Remove existing sheet if present
+        if SHEET_LOG_PARAMS in wb.sheetnames:
+            wb.remove(wb[SHEET_LOG_PARAMS])
+
+        # Create new sheet
+        params_sheet = wb.create_sheet(SHEET_LOG_PARAMS)
+
+        # Add headers
+        params_sheet.cell(row=1, column=1, value="Parameter")
+        params_sheet.cell(row=1, column=2, value="Value")
+        params_sheet.cell(row=1, column=3, value="Description")
+
+        # Get model parameters
+        model_params = getattr(define_category_prompt, "params", {})
+
+        # Configuration parameters with constant names
+        row = 2
+        params_sheet.cell(row=row, column=1, value="--- Configuration Settings ---")
+        params_sheet.cell(row=row, column=2, value="")
+        params_sheet.cell(row=row, column=3, value="Script configuration parameters")
+        row += 1
+
+        config_params = [
+            ("TIMESTAMP", self.timestamp, "Processing start time"),
+            (
+                "USE_ANSWER_FOR_CATEGORIZATION",
+                USE_ANSWER_FOR_CATEGORIZATION,
+                "Whether answers are used for categorization",
+            ),
+            (
+                "MAX_RETRY_ATTEMPTS",
+                MAX_RETRY_ATTEMPTS,
+                "Maximum retry attempts on error",
+            ),
+            ("RETRY_DELAY", RETRY_DELAY, "Delay between retries in seconds"),
+            ("LOG_CATEGORY", LOG_CATEGORY, "Enable category logging sheet"),
+            ("LOG_TO_FILE", LOG_TO_FILE, "Enable logging to text file"),
+            ("LOG_LEVEL", logging.getLevelName(LOG_LEVEL), "Logging verbosity level"),
+            ("START_ROW", START_ROW, "First row to process (skip headers)"),
+            ("SAVE_FREQUENCY", SAVE_FREQUENCY, "Save file every N rows"),
+        ]
+
+        for param_name, param_value, param_desc in config_params:
+            params_sheet.cell(row=row, column=1, value=param_name)
+            params_sheet.cell(row=row, column=2, value=str(param_value))
+            params_sheet.cell(row=row, column=3, value=param_desc)
+            row += 1
+
+        # File paths section
+        row += 1
+        params_sheet.cell(row=row, column=1, value="--- File Paths ---")
+        params_sheet.cell(row=row, column=2, value="")
+        params_sheet.cell(row=row, column=3, value="Input/output file locations")
+        row += 1
+
+        file_params = [
+            ("INPUT_FILE", str(INPUT_FILE), "Source Excel file path"),
+            ("OUTPUT_DIR", str(OUTPUT_DIR), "Output directory path"),
+            ("RESUME_FILE", str(RESUME_FILE), "Resume state file path"),
+        ]
+
+        for param_name, param_value, param_desc in file_params:
+            params_sheet.cell(row=row, column=1, value=param_name)
+            params_sheet.cell(row=row, column=2, value=param_value)
+            params_sheet.cell(row=row, column=3, value=param_desc)
+            row += 1
+
+        # Sheet names section
+        row += 1
+        params_sheet.cell(row=row, column=1, value="--- Sheet Names ---")
+        params_sheet.cell(row=row, column=2, value="")
+        params_sheet.cell(row=row, column=3, value="Excel worksheet names")
+        row += 1
+
+        sheet_params = [
+            ("SHEET_QA", SHEET_QA, "Questions and answers sheet"),
+            ("SHEET_CATEGORY", SHEET_CATEGORY, "Categories dictionary sheet"),
+            ("SHEET_LOG_PREFIX", SHEET_LOG_PREFIX, "Category logging sheet name"),
+            ("SHEET_LOG_PARAMS", SHEET_LOG_PARAMS, "Parameters logging sheet name"),
+        ]
+
+        for param_name, param_value, param_desc in sheet_params:
+            params_sheet.cell(row=row, column=1, value=param_name)
+            params_sheet.cell(row=row, column=2, value=param_value)
+            params_sheet.cell(row=row, column=3, value=param_desc)
+            row += 1
+
+        # Column indices section
+        row += 1
+        params_sheet.cell(row=row, column=1, value="--- Column Indices ---")
+        params_sheet.cell(row=row, column=2, value="")
+        params_sheet.cell(row=row, column=3, value="Excel column positions (1-based)")
+        row += 1
+
+        column_params = [
+            (
+                "COL_CATEGORY_NAME",
+                COL_CATEGORY_NAME,
+                "Category name column in CATEGORY sheet",
+            ),
+            (
+                "COL_CATEGORY_DESC",
+                COL_CATEGORY_DESC,
+                "Category description column in CATEGORY sheet",
+            ),
+            ("COL_QA_CATEGORY", COL_QA_CATEGORY, "Category column in QA sheet"),
+            ("COL_QA_QUESTION", COL_QA_QUESTION, "Question column in QA sheet"),
+            ("COL_QA_ANSWER", COL_QA_ANSWER, "Answer column in QA sheet"),
+        ]
+
+        for param_name, param_value, param_desc in column_params:
+            params_sheet.cell(row=row, column=1, value=param_name)
+            params_sheet.cell(row=row, column=2, value=str(param_value))
+            params_sheet.cell(row=row, column=3, value=param_desc)
+            row += 1
+
+        # Model parameters section
+        row += 1
+        params_sheet.cell(row=row, column=1, value="--- Model Parameters ---")
+        params_sheet.cell(row=row, column=2, value="")
+        params_sheet.cell(row=row, column=3, value="LLM configuration settings")
+        row += 1
+
+        # Model parameter descriptions
+        param_descriptions = {
+            "model": "LLM model name",
+            "temperature": "Randomness of responses (0-1)",
+            "top_p": "Nucleus sampling threshold",
+            "stream": "Whether to stream responses",
+            "max_tokens": "Maximum tokens in response",
+            "repetition_penalty": "Penalty for repeated tokens",
+        }
+
+        for param_name, param_value in model_params.items():
+            params_sheet.cell(row=row, column=1, value=param_name)
+            params_sheet.cell(row=row, column=2, value=str(param_value))
+            params_sheet.cell(
+                row=row, column=3, value=param_descriptions.get(param_name, "")
+            )
+            row += 1
+
+        # Auto-adjust column widths for readability
+        for column in params_sheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            params_sheet.column_dimensions[column_letter].width = adjusted_width
+
+        logger.info(f"Created '{SHEET_LOG_PARAMS}' sheet with model parameters")
+
     def create_output_file(self) -> Tuple[Workbook, Path]:
         """Create output file with timestamp.
 
@@ -273,6 +490,13 @@ class CategoryFiller:
         # Generate timestamp
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         output_file = OUTPUT_DIR / f"QA_{self.timestamp}.xlsx"
+
+        # Initialize file logger
+        if LOG_TO_FILE:
+            log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
+            self.dual_logger = DualLogger(log_file)
+            # Reinitialize global logger reference
+            self._update_logger()
 
         logger.info(f"Copying {INPUT_FILE} to {output_file}")
 
@@ -310,11 +534,17 @@ class CategoryFiller:
                 log_sheet.cell(row=1, column=col_idx, value=header)
 
             logger.info(f"Created '{log_sheet_name}' sheet with headers")
+
+            # Create LOG_CATEGORY_PARAMS sheet
+            self.create_log_params_sheet(wb)
         else:
             # If LOG_CATEGORY is False and sheet exists, remove it
             if log_sheet_name in wb.sheetnames:
                 logger.info(f"Removing '{log_sheet_name}' sheet (LOG_CATEGORY=False)")
                 wb.remove(wb[log_sheet_name])
+            if SHEET_LOG_PARAMS in wb.sheetnames:
+                logger.info(f"Removing '{SHEET_LOG_PARAMS}' sheet (LOG_CATEGORY=False)")
+                wb.remove(wb[SHEET_LOG_PARAMS])
 
         # Save modifications (only LOG_CATEGORY changes, everything else intact)
         wb.save(output_file)
@@ -393,10 +623,10 @@ class CategoryFiller:
         # This makes multi-line content readable in Excel cells
         return json_string.replace("\\n", "\n")
 
-    def categorize_question(
+    def categorize_question_with_retry(
         self, question: str, answer: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Categorize a single question using LLM with optional answer context.
+        """Categorize a question with retry logic on errors.
 
         Args:
             question: The question text to categorize.
@@ -405,41 +635,53 @@ class CategoryFiller:
         Returns:
             Dictionary with category, confidence, reasoning, and messages.
         """
-        try:
-            # Run categorization - answer will be used if provided and USE_ANSWER_FOR_CATEGORIZATION is True
-            result_json, messages_list = define_category_prompt.run(
-                question,
-                answer=answer if USE_ANSWER_FOR_CATEGORIZATION and answer else None,
-            )
-            result = json.loads(result_json)
+        last_error = None
 
-            # Convert messages list to JSON string for storage
-            messages_json = json.dumps(messages_list, ensure_ascii=False, indent=2)
+        for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
+            try:
+                # Run categorization
+                result_json, messages_list = define_category_prompt.run(
+                    question,
+                    answer=answer if USE_ANSWER_FOR_CATEGORIZATION and answer else None,
+                )
+                result = json.loads(result_json)
 
-            # Format JSON for Excel readability
-            messages_formatted = messages_json.replace("\\n", "\n")
+                # Convert messages list to JSON string for storage
+                messages_json = json.dumps(messages_list, ensure_ascii=False, indent=2)
 
-            # Add formatted messages to result dictionary
-            result["messages"] = messages_formatted
+                # Format JSON for Excel readability
+                messages_formatted = messages_json.replace("\\n", "\n")
 
-            return result
+                # Add formatted messages to result dictionary
+                result["messages"] = messages_formatted
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON response: {e}")
-            return {
-                "category": "Error",
-                "confidence": 0.0,
-                "reasoning": f"JSON parse error: {str(e)}",
-                "messages": "[]",
-            }
-        except Exception as e:
-            logger.error(f"Categorization failed: {e}")
-            return {
-                "category": "Error",
-                "confidence": 0.0,
-                "reasoning": f"Categorization error: {str(e)}",
-                "messages": "[]",
-            }
+                if attempt > 1:
+                    logger.info(f"Categorization succeeded on attempt {attempt}")
+
+                return result
+
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"Categorization attempt {attempt}/{MAX_RETRY_ATTEMPTS} failed: {e}"
+                )
+
+                if attempt < MAX_RETRY_ATTEMPTS:
+                    # Optional: add delay between retries
+                    import time
+
+                    if RETRY_DELAY > 0:
+                        time.sleep(RETRY_DELAY)
+                    continue
+
+        # All attempts failed
+        logger.error(f"All {MAX_RETRY_ATTEMPTS} categorization attempts failed")
+        return {
+            "category": "Error",
+            "confidence": 0.0,
+            "reasoning": f"All retry attempts failed. Last error: {str(last_error)}",
+            "messages": "[]",
+        }
 
     def process_row(
         self, sheet_qa: Worksheet, sheet_log: Optional[Worksheet], row_idx: int
@@ -477,8 +719,8 @@ class CategoryFiller:
                 )
                 logger.debug(f"Using answer for categorization: {answer_preview}")
 
-            # Categorize the question with optional answer
-            result = self.categorize_question(
+            # Categorize the question with retry logic
+            result = self.categorize_question_with_retry(
                 str(question), str(answer) if answer else None
             )
 
@@ -520,6 +762,7 @@ class CategoryFiller:
             logger.info(
                 f"Answer Usage: {'ENABLED' if USE_ANSWER_FOR_CATEGORIZATION else 'DISABLED'}"
             )
+            logger.info(f"Max Retry Attempts: {MAX_RETRY_ATTEMPTS}")
             logger.info("=" * 70)
 
             # Check for resume state
@@ -529,13 +772,23 @@ class CategoryFiller:
                 # Resume from previous run
                 logger.info("Resuming from previous run...")
                 self.output_file = Path(resume_state["output_file"])
-                self.workbook = openpyxl.load_workbook(self.output_file)
-                start_from_row = resume_state["last_row"] + 1
 
-                # Extract timestamp from filename for consistency
+                # Extract timestamp from filename for log file
                 filename = self.output_file.stem  # QA_YYYY-MM-DD_HHMMSS
                 if filename.startswith("QA_"):
                     self.timestamp = filename[3:]  # Remove "QA_" prefix
+
+                # Initialize file logger for resumed session
+                if LOG_TO_FILE:
+                    log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
+                    self.dual_logger = DualLogger(log_file)
+                    self._update_logger()  # Use helper method
+                    logger.info("=" * 70)
+                    logger.info("RESUMED SESSION")
+                    logger.info("=" * 70)
+
+                self.workbook = openpyxl.load_workbook(self.output_file)
+                start_from_row = resume_state["last_row"] + 1
 
                 # Load categories from existing file
                 if SHEET_CATEGORY not in self.workbook.sheetnames:
@@ -705,6 +958,10 @@ class CategoryFiller:
             logger.info(f"Output file: {self.output_file}")
             if LOG_CATEGORY and sheet_log:
                 logger.info(f"Detailed logs saved in '{SHEET_LOG_PREFIX}' sheet")
+                logger.info(f"Model parameters saved in '{SHEET_LOG_PARAMS}' sheet")
+            if LOG_TO_FILE:
+                log_path = OUTPUT_DIR / f"QA_{self.timestamp}.log"
+                logger.info(f"Text log saved to: {log_path}")
             logger.info("=" * 70)
 
             return True
@@ -741,6 +998,10 @@ class CategoryFiller:
                     self.workbook.close()
                 except Exception:
                     pass  # Ignore close errors
+
+            # Close log file handler
+            if self.dual_logger:
+                self.dual_logger.close()
 
 
 def main():

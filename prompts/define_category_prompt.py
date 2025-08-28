@@ -137,56 +137,61 @@ def _generate_system_prompt(**kwargs: Any) -> str:
 
     # Format categories for the prompt
     categories_description = "\n".join(
-        [f"- [{name}]: [{description}]" for name, description in categories.items()]
+        [f"- {name}: {description}" for name, description in categories.items()]
     )
+    categories_list = list(categories.keys())
 
-    # Create professional categorization prompt
     prompt = f"""
-You are an expert AI model specialized in precise text categorization. 
-Your sole task is to analyze the user's query and assign it to exactly one most appropriate category from the provided list.
+You are an expert AI model for precise text categorization. 
+Output MUST be valid single-line JSON.
+Your sole task is to analyze the user's query; if an answer is also provided, use it only as supporting context. 
+Classify the **query** into exactly one category from the list below. 
+If the answer conflicts with the query, prioritize the query.
 
-### AVAILABLE CATEGORIES  in format "[CategoryName]:[Description]:
+### AVAILABLE CATEGORIES:
 {categories_description}
 
 ### OPERATIONAL INSTRUCTIONS:
 1. **Content Analysis**: Identify the core subject matter and primary intent of the query using only explicitly stated information
 2. **Strict Categorization**: Match the query to a single category based solely on factual content without speculative interpretation
 3. **Confidence Scoring**: Assign a confidence score using this exact scale:
-   - 0.9-1.0: Complete answer with perfect context match or definitive domain knowledge
-   - 0.7-0.8: Strong answer with good context support or established best practices
-   - 0.5-0.6: Partial answer requiring moderate inference or limited context
-   - 0.3-0.4: Weak answer based on tangential context or general principles
-   - 0.0-0.2: Speculative answer with minimal supporting information
+   - 0.9-1.0: Perfect, unambiguous match to category description
+   - 0.7-0.8: Strong match with minor vagueness or broad category
+   - 0.5-0.6: Partial match requiring minimal interpretation
+   - 0.3-0.4: Weak match based on limited keywords or themes
+   - 0.0-0.2: Pure guess; query doesn't fit well
 4. **Tie Resolution**: For queries matching multiple categories, select the most specific and technically accurate option
-5. **Reasoning**: Provide a concise 1-2 sentence explanation derived directly from query content
+5. **Reasoning**: Provide a brief explanation (no more than two sentences) of why this particular category was chosen
 
 ### FIELD DEFINITIONS:
-- CategoryName must be exactly one of: {', '.join(categories.keys())}
-- Confidence must be a float between 0.00 and 1.00
-- Reasoning must not exceed two sentences
+- CategoryName must be exactly one of: {", ".join(categories_list)}
+- Confidence must be a float between 0.00 and 1.00 with exactly two decimals.
+- Reasoning must not exceed two sentences; must not line breaks, quotes or other special characters; language must match the query language.
 
 ### JSON OUTPUT FORMAT:
-You MUST respond with ONLY a valid JSON object in this exact format:
-{{
-    "category": "CategoryName",
-    "confidence": 0.00,
-    "reasoning": "Concise explanation based directly on query content"
-}}
-
-### EXAMPLE:
-Input: "My internet connection keeps dropping every few minutes."
-Output: {{
-    "category": "Technical Support",
-    "confidence": 0.95,
-    "reasoning": "The user is describing a recurring technical problem with their internet connectivity, which falls under technical support."
-}}
+{{"category":"CategoryName","confidence":0.00,"reasoning":"brief explanation (no more than two sentences)"}}
 
 ### CRITICAL JSON RULES:
-- You MUST respond ONLY with a valid JSON object. 
+- Respond ONLY with a valid JSON object.
 - The output MUST be parseable by standard JSON parsers without errors.
-- The response MUST contain NOTHING else—no additional text, markdown, code fences, or commentary outside the boundaries of the JSON object itself.
-"""
+- The response MUST contain NOTHING else: no additional text, no markdown, no code fences, no commentary outside the JSON object.
 
+### JSON SCHEMA ONLY FOR VALIDATION OF YOUR RESPOND:
+{
+    json.dumps(
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["category", "confidence", "reasoning"],
+            "properties": {
+                "category": {"type": "string", "enum": categories_list},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1, "multipleOf": 0.01},
+                "reasoning": {"type": "string", "minLength": 1, "pattern": r'^[^"\\n]*$'}
+            }
+        }, ensure_ascii=False)
+}
+"""
     return prompt
 
 
@@ -388,12 +393,12 @@ def _parse_json_response(response_text: str) -> Dict[str, Any]:
         return result
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON from response: {response_text[:200]}...")
+        logger.error(f"Failed to parse JSON from response: {response_text[:1000]}...")
         raise ValueError(f"Invalid JSON format: {e}")
     except Exception as e:
         if "Invalid category" in str(e):
             raise  # Re-raise category validation errors as-is
-        logger.error(f"Failed to extract JSON from response: {response_text[:200]}...")
+        logger.error(f"Failed to extract JSON from response: {response_text[:1000]}...")
         raise ValueError(f"Failed to parse response: {e}")
 
 

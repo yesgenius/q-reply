@@ -9,10 +9,10 @@ embeddings using GigaChat, and maintains a synchronized vector database
 with detailed logging for monitoring and debugging.
 
 Usage:
-    python update_db.py
+   python update_db.py
 
 Configuration:
-    Adjust settings at the beginning of the script for IDE execution.
+   Adjust settings at the beginning of the script for IDE execution.
 """
 
 import json
@@ -50,6 +50,7 @@ DB_PATH = "qa.duckdb"
 # Sheet names
 SHEET_QA = "QA"
 SHEET_LOG_PREFIX = "LOG_DB"
+SHEET_LOG_PARAMS = "LOG_DB_PARAMS"
 
 # Column indices (1-based for openpyxl)
 COL_CATEGORY = 1  # Column A in QA sheet
@@ -61,6 +62,7 @@ EMBEDDING_SIZE = 2560  # GigaChat EmbeddingsGigaR model output size
 
 # Logging configuration
 LOG_DB = True  # Set to False to disable database logging sheet
+LOG_TO_FILE = True  # Enable logging to text file
 LOG_LEVEL = logging.INFO
 
 # Processing configuration
@@ -74,11 +76,55 @@ RESUME_FILE = Path(".update_db_resume.json")  # Hidden file for resume state
 # END OF CONFIGURATION SECTION
 # ============================================================================
 
-# Configure logging
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]",
-)
+
+class DualLogger:
+    """Logger that writes to both console and file."""
+
+    def __init__(self, log_file: Optional[Path] = None):
+        """Initialize dual logger.
+
+        Args:
+            log_file: Path to log file. If None, only console logging.
+        """
+        self.log_file = log_file
+        self.file_handler = None
+
+        # Configure main logger
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(LOG_LEVEL)
+
+        # Clear existing handlers to avoid duplicates
+        self.logger.handlers.clear()
+
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(LOG_LEVEL)
+        formatter = logging.Formatter(
+            "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
+        )
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+
+        # File handler if requested
+        if log_file and LOG_TO_FILE:
+            try:
+                log_file.parent.mkdir(parents=True, exist_ok=True)
+                self.file_handler = logging.FileHandler(log_file, encoding="utf-8")
+                self.file_handler.setLevel(LOG_LEVEL)
+                self.file_handler.setFormatter(formatter)
+                self.logger.addHandler(self.file_handler)
+                self.logger.info(f"Logging to file: {log_file}")
+            except Exception as e:
+                self.logger.warning(f"Could not create log file: {e}")
+
+    def close(self):
+        """Close file handler if exists."""
+        if self.file_handler:
+            self.file_handler.close()
+            self.logger.removeHandler(self.file_handler)
+
+
+# Global logger instance
 logger = logging.getLogger(__name__)
 
 
@@ -96,6 +142,13 @@ class DatabaseUpdater:
         self.skipped_count: int = 0
         self.resume_state: Dict = {}
         self.timestamp: str = ""
+        self.dual_logger: Optional[DualLogger] = None
+
+    def _update_logger(self) -> None:
+        """Update global logger reference when dual logger is available."""
+        global logger
+        if self.dual_logger:
+            logger = self.dual_logger.logger
 
     def validate_input_file(self) -> bool:
         """Validate that input file exists and has required sheets.
@@ -104,26 +157,26 @@ class DatabaseUpdater:
             True if validation passes, False otherwise.
         """
         if not INPUT_FILE.exists():
-            logger.error(f"Input file not found: {INPUT_FILE}")
+            print(f"Error: Input file not found: {INPUT_FILE}")
             return False
 
         # Check if file is accessible
         try:
             with open(INPUT_FILE, "rb") as f:
-                pass  # Just check if we can open it
+                pass
         except PermissionError:
-            logger.error(f"Cannot access file: {INPUT_FILE}")
-            logger.error("The file might be open in Excel or another program.")
+            print(f"Error: Cannot access file: {INPUT_FILE}")
+            print("The file might be open in Excel or another program.")
             return False
         except IOError as e:
-            logger.error(f"Cannot read file {INPUT_FILE}: {e}")
+            print(f"Error: Cannot read file {INPUT_FILE}: {e}")
             return False
 
         try:
             wb = openpyxl.load_workbook(INPUT_FILE, read_only=True)
 
             if SHEET_QA not in wb.sheetnames:
-                logger.error(f"Required sheet '{SHEET_QA}' not found")
+                print(f"Error: Required sheet '{SHEET_QA}' not found")
                 wb.close()
                 return False
 
@@ -131,7 +184,7 @@ class DatabaseUpdater:
             return True
 
         except Exception as e:
-            logger.error(f"Error reading input file: {e}")
+            print(f"Error: Error reading input file: {e}")
             return False
 
     def validate_qa_data(self, sheet: Worksheet) -> bool:
@@ -169,7 +222,7 @@ class DatabaseUpdater:
 
         if incomplete_rows:
             logger.error(f"Found {len(incomplete_rows)} incomplete rows:")
-            for row_info in incomplete_rows[:5]:  # Show first 5
+            for row_info in incomplete_rows[:5]:
                 logger.error(
                     f"  Row {row_info['row']}: "
                     f"Category={row_info['category']}, "
@@ -214,6 +267,75 @@ class DatabaseUpdater:
             logger.error(f"Failed to initialize database: {e}")
             raise
 
+    def create_log_params_sheet(self, wb: Workbook) -> None:
+        """Create or update LOG_DB_PARAMS sheet with script parameters.
+
+        Args:
+            wb: Workbook to add the sheet to.
+        """
+        if not LOG_DB:
+            return
+
+        # Remove existing sheet if present
+        if SHEET_LOG_PARAMS in wb.sheetnames:
+            wb.remove(wb[SHEET_LOG_PARAMS])
+
+        # Create new sheet
+        params_sheet = wb.create_sheet(SHEET_LOG_PARAMS)
+
+        # Add headers
+        params_sheet.cell(row=1, column=1, value="Parameter")
+        params_sheet.cell(row=1, column=2, value="Value")
+        params_sheet.cell(row=1, column=3, value="Description")
+
+        # Add parameters with constant names
+        row = 2
+        config_params = [
+            ("Timestamp", self.timestamp, "Processing start time"),
+            ("DB_PATH", str(DB_PATH), "DuckDB database path"),
+            (
+                "DEFAULT_MODEL",
+                base_embedding.DEFAULT_MODEL,
+                "Default embedding model from base_embedding",
+            ),
+            ("EMBEDDING_SIZE", EMBEDDING_SIZE, "Embedding vector dimension"),
+            ("SAVE_FREQUENCY", SAVE_FREQUENCY, "Save file every N rows"),
+            ("START_ROW", START_ROW, "First data row in Excel"),
+            ("LOG_TO_FILE", LOG_TO_FILE, "Whether text logging is enabled"),
+            ("LOG_LEVEL", logging.getLevelName(LOG_LEVEL), "Logging detail level"),
+            ("LOG_DB", LOG_DB, "Whether database logging sheet is enabled"),
+            ("INPUT_FILE", str(INPUT_FILE), "Source Excel file path"),
+            ("OUTPUT_DIR", str(OUTPUT_DIR), "Output directory for results"),
+            ("SHEET_QA", SHEET_QA, "Name of Q&A sheet"),
+            ("SHEET_LOG_PREFIX", SHEET_LOG_PREFIX, "Name of logging sheet"),
+            ("SHEET_LOG_PARAMS", SHEET_LOG_PARAMS, "Name of parameters sheet"),
+            ("COL_CATEGORY", COL_CATEGORY, "Category column index (1-based)"),
+            ("COL_QUESTION", COL_QUESTION, "Question column index (1-based)"),
+            ("COL_ANSWER", COL_ANSWER, "Answer column index (1-based)"),
+            ("RESUME_FILE", str(RESUME_FILE), "Path to resume state file"),
+        ]
+
+        for param_name, param_value, param_desc in config_params:
+            params_sheet.cell(row=row, column=1, value=param_name)
+            params_sheet.cell(row=row, column=2, value=str(param_value))
+            params_sheet.cell(row=row, column=3, value=param_desc)
+            row += 1
+
+        # Auto-adjust column widths
+        for column in params_sheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            params_sheet.column_dimensions[column_letter].width = adjusted_width
+
+        logger.info(f"Created '{SHEET_LOG_PARAMS}' sheet with script parameters")
+
     def create_output_file(self) -> Tuple[Workbook, Path]:
         """Create output file with timestamp.
 
@@ -227,6 +349,12 @@ class DatabaseUpdater:
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         output_file = OUTPUT_DIR / f"QA_{self.timestamp}.xlsx"
 
+        # Initialize file logger
+        if LOG_TO_FILE:
+            log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
+            self.dual_logger = DualLogger(log_file)
+            self._update_logger()
+
         logger.info(f"Copying {INPUT_FILE} to {output_file}")
 
         # Copy the file
@@ -237,7 +365,7 @@ class DatabaseUpdater:
         wb = openpyxl.load_workbook(output_file)
 
         # Handle LOG_DB sheet based on configuration
-        log_sheet_name = SHEET_LOG_PREFIX  # Simply "LOG_DB"
+        log_sheet_name = SHEET_LOG_PREFIX
 
         if LOG_DB:
             # Remove existing log sheet if it exists
@@ -254,11 +382,17 @@ class DatabaseUpdater:
                 log_sheet.cell(row=1, column=col_idx, value=header)
 
             logger.info(f"Created '{log_sheet_name}' sheet with headers")
+
+            # Create LOG_DB_PARAMS sheet
+            self.create_log_params_sheet(wb)
         else:
-            # Remove log sheet if it exists and LOG_DB is False
+            # Remove log sheets if they exist and LOG_DB is False
             if log_sheet_name in wb.sheetnames:
                 logger.info(f"Removing '{log_sheet_name}' sheet (LOG_DB=False)")
                 wb.remove(wb[log_sheet_name])
+            if SHEET_LOG_PARAMS in wb.sheetnames:
+                logger.info(f"Removing '{SHEET_LOG_PARAMS}' sheet (LOG_DB=False)")
+                wb.remove(wb[SHEET_LOG_PARAMS])
 
         # Save modifications
         wb.save(output_file)
@@ -302,15 +436,15 @@ class DatabaseUpdater:
             # Validate output file still exists
             output_path = Path(state["output_file"])
             if output_path.exists():
-                logger.info(f"Found resume state from {state['timestamp']}")
-                logger.info(f"Will continue from row {state['last_row'] + 1}")
+                print(f"Found resume state from {state['timestamp']}")
+                print(f"Will continue from row {state['last_row'] + 1}")
                 return state
             else:
-                logger.warning("Resume output file not found, starting fresh")
+                print("Resume output file not found, starting fresh")
                 return None
 
         except Exception as e:
-            logger.warning(f"Could not load resume state: {e}")
+            print(f"Warning: Could not load resume state: {e}")
             return None
 
     def clear_resume_state(self) -> None:
@@ -364,7 +498,6 @@ class DatabaseUpdater:
                         f"Row {row_idx}: Question exists with same answer, skipping"
                     )
                     self.skipped_count += 1
-                    action = "SKIPPED"
                     input_text_q = ""
                     input_text_a = ""
                 else:
@@ -391,7 +524,6 @@ class DatabaseUpdater:
 
                     if success:
                         self.updated_count += 1
-                        action = "UPDATED"
                         input_text_q = ""
                         input_text_a = answer_inputs[0]
                         logger.info(f"Row {row_idx}: Successfully updated answer")
@@ -429,7 +561,6 @@ class DatabaseUpdater:
 
                 if success:
                     self.inserted_count += 1
-                    action = "INSERTED"
                     input_text_q = question_inputs[0]
                     input_text_a = answer_inputs[0]
                     logger.info(f"Row {row_idx}: Successfully inserted new Q&A")
@@ -439,7 +570,6 @@ class DatabaseUpdater:
 
             # Log to LOG_DB sheet if enabled
             if LOG_DB and sheet_log:
-                # Write to the same row number for alignment
                 sheet_log.cell(row=row_idx, column=1, value=question)
                 sheet_log.cell(row=row_idx, column=2, value=input_text_q)
                 sheet_log.cell(row=row_idx, column=3, value=answer)
@@ -488,38 +618,54 @@ class DatabaseUpdater:
             True if execution completed successfully, False otherwise.
         """
         try:
-            logger.info("=" * 70)
-            logger.info("Starting Database Update Script")
-            logger.info("=" * 70)
+            # Use print for initial messages before logger is initialized
+            print("=" * 70)
+            print("Starting Database Update Script")
+            print("=" * 70)
 
             # Check for resume state
             resume_state = self.load_resume_state()
 
             if resume_state:
                 # Resume from previous run
-                logger.info("Resuming from previous run...")
+                print("Resuming from previous run...")
                 self.output_file = Path(resume_state["output_file"])
-                self.workbook = openpyxl.load_workbook(self.output_file)
-                start_from_row = resume_state["last_row"] + 1
 
-                # Extract timestamp from filename
+                # Extract timestamp from filename for log file
                 filename = self.output_file.stem
                 if filename.startswith("QA_"):
                     self.timestamp = filename[3:]
+
+                # Initialize file logger for resumed session
+                if LOG_TO_FILE:
+                    log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
+                    self.dual_logger = DualLogger(log_file)
+                    self._update_logger()
+                    logger.info("=" * 70)
+                    logger.info("RESUMED SESSION")
+                    logger.info("=" * 70)
+
+                self.workbook = openpyxl.load_workbook(self.output_file)
+                start_from_row = resume_state["last_row"] + 1
             else:
                 # Fresh start
-                logger.info("Starting fresh processing...")
+                print("Starting fresh processing...")
 
                 # Step 1: Validate input file
-                logger.info("Step 1: Validating input file...")
+                print("Step 1: Validating input file...")
                 if not self.validate_input_file():
-                    logger.error("FAILED: Cannot proceed with processing")
+                    print("FAILED: Cannot proceed with processing")
                     return False
 
-                # Step 2: Create output file
-                logger.info("Step 2: Creating output file...")
+                # Step 2: Create output file (this initializes the logger)
+                print("Step 2: Creating output file...")
                 self.workbook, self.output_file = self.create_output_file()
                 start_from_row = START_ROW
+
+                # Now logger is initialized, use it for further logging
+                logger.info("=" * 70)
+                logger.info("Starting Database Update Script")
+                logger.info("=" * 70)
 
             # Step 3: Validate QA data completeness
             logger.info("Step 3: Validating QA sheet data...")
@@ -608,6 +754,10 @@ class DatabaseUpdater:
             logger.info(f"Output file: {self.output_file}")
             if LOG_DB and sheet_log:
                 logger.info(f"Detailed logs saved in '{SHEET_LOG_PREFIX}' sheet")
+                logger.info(f"Script parameters saved in '{SHEET_LOG_PARAMS}' sheet")
+            if LOG_TO_FILE:
+                log_path = OUTPUT_DIR / f"QA_{self.timestamp}.log"
+                logger.info(f"Text log saved to: {log_path}")
             logger.info("=" * 70)
 
             return True
@@ -651,6 +801,10 @@ class DatabaseUpdater:
                 except Exception:
                     pass
 
+            # Close log file handler
+            if self.dual_logger:
+                self.dual_logger.close()
+
 
 def main():
     """Main entry point for the script."""
@@ -659,17 +813,17 @@ def main():
         success = updater.run()
 
         if success:
-            logger.info("Script completed successfully")
+            print("Script completed successfully")
         else:
-            logger.error("Script completed with errors")
+            print("Script completed with errors")
 
         sys.exit(0 if success else 1)
 
     except KeyboardInterrupt:
-        logger.info("\nScript interrupted by user")
+        print("\nScript interrupted by user")
         sys.exit(130)
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        print(f"Fatal error: {e}")
         sys.exit(1)
 
 

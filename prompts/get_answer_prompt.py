@@ -147,7 +147,8 @@ def _generate_system_prompt(**kwargs: Any) -> str:
     topic = kwargs.get("topic")
 
     # Base system prompt
-    base_prompt = """You are an expert technical advisor at a professional conference.
+    base_prompt = """
+You are an expert AI model in the field of consulting at a professional conference, providing answers in correct JSON format.
 Your sole task is to analyze questions and provide comprehensive, accurate answers based on available context and domain expertise.
 
 ### INFORMATION SOURCES:
@@ -159,7 +160,8 @@ Your sole task is to analyze questions and provide comprehensive, accurate answe
 - Prioritize information from provided Context when directly relevant
 - Supplement with domain knowledge when context is insufficient  
 - Maintain technical accuracy and professional tone
-- Provide actionable insights and specific examples where applicable"""
+- Provide actionable insights and specific examples where applicable
+"""
 
     # Add topic context if provided
     if topic:
@@ -167,12 +169,14 @@ Your sole task is to analyze questions and provide comprehensive, accurate answe
 
 ### CONFERENCE TOPIC:
 Current focus: {topic}
-Ensure all answers maintain relevance to this topic when applicable."""
+
+Ensure all answers maintain relevance to this topic when applicable.
+"""
     else:
         topic_context = ""
 
     # Instructions for answer generation with clear sources_used rules
-    instructions = """
+    instructions = f"""
 
 ### OPERATIONAL INSTRUCTIONS:
 1. **Content Analysis**: Extract relevant information from provided Q&A pairs using exact matching and semantic understanding
@@ -184,37 +188,59 @@ Ensure all answers maintain relevance to this topic when applicable."""
    - 0.5-0.6: Partial answer requiring moderate inference or limited context
    - 0.3-0.4: Weak answer based on tangential context or general principles
    - 0.0-0.2: Speculative answer with minimal supporting information
-5. **Source Attribution**: Track information origin precisely:
+5. **Sources used**: Track information origin precisely:
    - Use ["context"] ONLY when answer derives exclusively from Q&A pairs
    - Use ["domain_knowledge"] ONLY when using general expertise without context
    - Use ["context", "domain_knowledge"] when combining both sources
 
 ### FIELD DEFINITIONS:
-- answer: Complete response with \\n for line breaks where needed
-- confidence: Float between 0.00 and 1.00 indicating answer reliability
-- sources_used: Array containing exactly ["context"], ["domain_knowledge"], or ["context", "domain_knowledge"]
+- Answer must be a complete response, using \\n for line breaks where needed; language must match the query language.
+- Confidence must be a float between 0.00 and 1.00, with exactly two decimals.
+- Sources used must be an array containing exactly one of: ["context"], ["domain_knowledge"], or both: ["context", "domain_knowledge"].
 
 ### JSON OUTPUT FORMAT:
-You MUST respond with ONLY a valid JSON object in this exact format:
-{
-    "answer": "Your comprehensive answer here",
-    "confidence": 0.00,
-    "sources_used": ["source_type"]
-}
-
-### EXAMPLE:
-Input: "What are the best practices for API versioning?"
-Context: "Q: How should we version our APIs? A: Use semantic versioning and URL path versioning."
-Output: {
-    "answer": "Based on the conference discussion, semantic versioning combined with URL path versioning is recommended. This typically involves including version numbers in the API path (e.g., /api/v1/) and following MAJOR.MINOR.PATCH numbering for breaking changes, new features, and bug fixes respectively.",
-    "confidence": 0.85,
-    "sources_used": ["context", "domain_knowledge"]
-}
+{{"answer": "Your comprehensive answer here", "confidence": 0.00, "sources_used": ["context"]|["domain_knowledge"]|["context", "domain_knowledge"]}}
 
 ### CRITICAL JSON RULES:
-- You MUST respond ONLY with a valid JSON object
-- The output MUST be parseable by standard JSON parsers without errors
-- The response MUST contain NOTHING else—no additional text, markdown, code fences, or commentary outside the JSON boundaries"""
+- Respond ONLY with a valid JSON object.
+- The output MUST be parseable by standard JSON parsers without errors.
+- The response MUST contain NOTHING else: no additional text, no markdown, no code fences, no commentary outside the JSON object.
+
+### JSON SCHEMA ONLY FOR VALIDATION OF YOUR RESPOND:
+{
+    json.dumps(
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["answer", "confidence", "sources_used"],
+            "properties": {
+                "answer": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": r'^[^"\\n]*$'
+                },
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "multipleOf": 0.01
+                },
+                "sources_used": {
+                    "type": "array",
+                    "enum": [
+                        ["context"],
+                        ["domain_knowledge"],
+                        ["context", "domain_knowledge"]
+                    ]
+                }
+            }
+        },
+        ensure_ascii=False
+    )
+}
+
+"""
 
     prompt = base_prompt + topic_context + instructions
     return prompt
@@ -395,7 +421,7 @@ def _parse_json_response(response_text: str) -> Dict[str, Any]:
         return result
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON from response: {response_text[:200]}...")
+        logger.error(f"Failed to parse JSON from response: {response_text[:1000]}...")
         # Try one more recovery attempt - extract just the answer
         try:
             import re
@@ -409,7 +435,7 @@ def _parse_json_response(response_text: str) -> Dict[str, Any]:
             pass
         raise ValueError(f"Invalid JSON format: {e}")
     except Exception as e:
-        logger.error(f"Failed to extract JSON from response: {response_text[:200]}...")
+        logger.error(f"Failed to extract JSON from response: {response_text[:1000]}...")
         raise ValueError(f"Failed to parse response: {e}")
 
 
@@ -913,7 +939,7 @@ if __name__ == "__main__":
 
         print("\nSTEP 5: Parse and use results")
         print(f"  Parsed JSON fields: {list(result.keys())}")
-        print(f"  Answer (first 200 chars): {result['answer'][:200]}...")
+        print(f"  Answer (first 1000 chars): {result['answer'][:1000]}...")
         if "confidence" in result:
             print(f"  Confidence score: {result['confidence']}")
 

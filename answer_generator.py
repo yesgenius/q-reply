@@ -21,6 +21,7 @@ import json
 import logging
 import shutil
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -58,6 +59,7 @@ SHEET_Q = "Q"
 SHEET_T = "T"
 SHEET_CATEGORY = "CATEGORY"
 SHEET_LOG_PREFIX = "LOG_ANSWER"
+SHEET_LOG_PARAMS = "LOG_ANSWER_PARAMS"  # New sheet for model parameters
 
 # Column indices for Q sheet (1-based for openpyxl)
 COL_Q_QUESTION = 1  # Column A - Question
@@ -78,8 +80,14 @@ SIMILARITY_THRESHOLD = 0.15  # Minimum cosine similarity
 EMBEDDING_MODEL = "EmbeddingsGigaR"
 EMBEDDING_DIMENSION = 2560
 
+# Retry configuration
+MAX_RETRY_ATTEMPTS_CATEGORY = 3  # Maximum retry attempts for categorization
+MAX_RETRY_ATTEMPTS_ANSWER = 3  # Maximum retry attempts for answer generation
+RETRY_DELAY = 1  # Delay between retries in seconds
+
 # Logging configuration
 LOG_ANSWER = True  # Set to False to disable answer logging sheet
+LOG_TO_FILE = True  # Enable logging to text file
 LOG_LEVEL = logging.INFO
 
 # Processing configuration
@@ -93,11 +101,52 @@ RESUME_FILE = Path(".answer_generator_resume.json")  # Hidden file for resume st
 # END OF CONFIGURATION SECTION
 # ============================================================================
 
-# Configure logging
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]",
-)
+
+class DualLogger:
+    """Logger that writes to both console and file."""
+
+    def __init__(self, log_file: Optional[Path] = None):
+        """Initialize dual logger.
+
+        Args:
+            log_file: Path to log file. If None, only console logging.
+        """
+        self.log_file = log_file
+        self.file_handler = None
+
+        # Configure main logger
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(LOG_LEVEL)
+
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(LOG_LEVEL)
+        formatter = logging.Formatter(
+            "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
+        )
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+
+        # File handler if requested
+        if log_file and LOG_TO_FILE:
+            try:
+                log_file.parent.mkdir(parents=True, exist_ok=True)
+                self.file_handler = logging.FileHandler(log_file, encoding="utf-8")
+                self.file_handler.setLevel(LOG_LEVEL)
+                self.file_handler.setFormatter(formatter)
+                self.logger.addHandler(self.file_handler)
+                self.logger.info(f"Logging to file: {log_file}")
+            except Exception as e:
+                self.logger.warning(f"Could not create log file: {e}")
+
+    def close(self):
+        """Close file handler if exists."""
+        if self.file_handler:
+            self.file_handler.close()
+            self.logger.removeHandler(self.file_handler)
+
+
+# Global logger instance (will be initialized in AnswerGenerator)
 logger = logging.getLogger(__name__)
 
 
@@ -114,6 +163,13 @@ class AnswerGenerator:
         self.processed_count: int = 0
         self.resume_state: Dict = {}
         self.timestamp: str = ""
+        self.dual_logger: Optional[DualLogger] = None
+
+    def _update_logger(self) -> None:
+        """Update global logger reference when dual logger is available."""
+        global logger
+        if self.dual_logger:
+            logger = self.dual_logger.logger
 
     def validate_input_files(self) -> bool:
         """Validate that required input files exist and are accessible.
@@ -247,6 +303,143 @@ class AnswerGenerator:
             logger.error(f"Error loading categories: {e}")
             return {}
 
+    def create_log_params_sheet(self, wb: Workbook) -> None:
+        """Create or update LOG_ANSWER_PARAMS sheet with model parameters.
+
+        Args:
+            wb: Workbook to add the sheet to.
+        """
+        if not LOG_ANSWER:
+            return
+
+        # Remove existing sheet if present
+        if SHEET_LOG_PARAMS in wb.sheetnames:
+            wb.remove(wb[SHEET_LOG_PARAMS])
+
+        # Create new sheet
+        params_sheet = wb.create_sheet(SHEET_LOG_PARAMS)
+
+        # Add headers
+        params_sheet.cell(row=1, column=1, value="Parameter")
+        params_sheet.cell(row=1, column=2, value="Value")
+        params_sheet.cell(row=1, column=3, value="Description")
+
+        # Configuration parameters with constant names
+        row = 2
+        config_params = [
+            ("Timestamp", self.timestamp, "Processing start time"),
+            ("TOP_K_SIMILAR", TOP_K_SIMILAR, "Number of similar questions to retrieve"),
+            ("SIMILARITY_THRESHOLD", SIMILARITY_THRESHOLD, "Minimum cosine similarity"),
+            ("EMBEDDING_MODEL", EMBEDDING_MODEL, "Model for embeddings"),
+            ("EMBEDDING_DIMENSION", EMBEDDING_DIMENSION, "Embedding vector size"),
+            (
+                "MAX_RETRY_ATTEMPTS_CATEGORY",
+                MAX_RETRY_ATTEMPTS_CATEGORY,
+                "Max retries for categorization",
+            ),
+            (
+                "MAX_RETRY_ATTEMPTS_ANSWER",
+                MAX_RETRY_ATTEMPTS_ANSWER,
+                "Max retries for answer generation",
+            ),
+            ("RETRY_DELAY", RETRY_DELAY, "Delay between retries (seconds)"),
+            ("SAVE_FREQUENCY", SAVE_FREQUENCY, "Save file every N rows"),
+            ("LOG_ANSWER", LOG_ANSWER, "Enable detailed logging sheet"),
+            ("LOG_TO_FILE", LOG_TO_FILE, "Enable logging to text file"),
+            ("START_ROW", START_ROW, "First row to process (skip headers)"),
+        ]
+
+        for param_name, param_value, param_desc in config_params:
+            params_sheet.cell(row=row, column=1, value=param_name)
+            params_sheet.cell(row=row, column=2, value=str(param_value))
+            params_sheet.cell(row=row, column=3, value=param_desc)
+            row += 1
+
+        # Add separator for category model parameters (always show if module exists)
+        try:
+            category_params = getattr(define_category_prompt, "params", {})
+            if category_params:
+                row += 1
+                params_sheet.cell(
+                    row=row, column=1, value="--- Category Model Parameters ---"
+                )
+                row += 1
+
+                param_descriptions = {
+                    "model": "LLM model name for categorization",
+                    "temperature": "Randomness of responses (0-1)",
+                    "top_p": "Nucleus sampling threshold",
+                    "stream": "Whether to stream responses",
+                    "max_tokens": "Maximum tokens in response",
+                    "repetition_penalty": "Penalty for repeated tokens",
+                }
+
+                for param_name, param_value in category_params.items():
+                    params_sheet.cell(row=row, column=1, value=f"category.{param_name}")
+                    params_sheet.cell(row=row, column=2, value=str(param_value))
+                    params_sheet.cell(
+                        row=row, column=3, value=param_descriptions.get(param_name, "")
+                    )
+                    row += 1
+        except AttributeError:
+            logger.debug("Category prompt module params not available")
+
+        # Add separator for answer model parameters
+        try:
+            answer_params = getattr(get_answer_prompt, "params", {})
+            if answer_params:
+                row += 1
+                params_sheet.cell(
+                    row=row, column=1, value="--- Answer Model Parameters ---"
+                )
+                row += 1
+
+                param_descriptions = {
+                    "model": "LLM model name for answer generation",
+                    "temperature": "Randomness of responses (0-1)",
+                    "top_p": "Nucleus sampling threshold",
+                    "stream": "Whether to stream responses",
+                    "max_tokens": "Maximum tokens in response",
+                    "repetition_penalty": "Penalty for repeated tokens",
+                }
+
+                for param_name, param_value in answer_params.items():
+                    params_sheet.cell(row=row, column=1, value=f"answer.{param_name}")
+                    params_sheet.cell(row=row, column=2, value=str(param_value))
+                    params_sheet.cell(
+                        row=row, column=3, value=param_descriptions.get(param_name, "")
+                    )
+                    row += 1
+        except AttributeError:
+            logger.debug("Answer prompt module params not available")
+
+        # Add separator for embedding model
+        row += 1
+        params_sheet.cell(row=row, column=1, value="--- Embedding Model ---")
+        row += 1
+
+        default_embedding_model = getattr(base_embedding, "DEFAULT_MODEL", "Unknown")
+        params_sheet.cell(row=row, column=1, value="base_embedding.DEFAULT_MODEL")
+        params_sheet.cell(row=row, column=2, value=default_embedding_model)
+        params_sheet.cell(
+            row=row, column=3, value="Default model for creating embeddings"
+        )
+
+        # Auto-adjust column widths
+        for column in params_sheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            params_sheet.column_dimensions[column_letter].width = adjusted_width
+
+        logger.info(f"Created '{SHEET_LOG_PARAMS}' sheet with model parameters")
+
     def create_output_file(self) -> Tuple[Workbook, Path]:
         """Create output file with timestamp.
 
@@ -259,6 +452,12 @@ class AnswerGenerator:
         # Generate timestamp
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         output_file = OUTPUT_DIR / f"Q_{self.timestamp}.xlsx"
+
+        # Initialize file logger
+        if LOG_TO_FILE:
+            log_file = OUTPUT_DIR / f"Q_{self.timestamp}.log"
+            self.dual_logger = DualLogger(log_file)
+            self._update_logger()
 
         logger.info(f"Copying {INPUT_FILE_Q} to {output_file}")
 
@@ -315,11 +514,17 @@ class AnswerGenerator:
                 log_sheet.cell(row=1, column=col_idx, value=header)
 
             logger.info(f"Created '{log_sheet_name}' sheet with headers")
+
+            # Create LOG_ANSWER_PARAMS sheet
+            self.create_log_params_sheet(wb)
         else:
             # If LOG_ANSWER is False and sheet exists, remove it
             if log_sheet_name in wb.sheetnames:
                 logger.info(f"Removing '{log_sheet_name}' sheet (LOG_ANSWER=False)")
                 wb.remove(wb[log_sheet_name])
+            if SHEET_LOG_PARAMS in wb.sheetnames:
+                logger.info(f"Removing '{SHEET_LOG_PARAMS}' sheet (LOG_ANSWER=False)")
+                wb.remove(wb[SHEET_LOG_PARAMS])
 
         # Save modifications
         wb.save(output_file)
@@ -383,8 +588,8 @@ class AnswerGenerator:
             except Exception as e:
                 logger.warning(f"Could not clear resume state: {e}")
 
-    def categorize_question(self, question: str) -> Optional[Dict[str, Any]]:
-        """Categorize a question if categories are available.
+    def categorize_question_with_retry(self, question: str) -> Optional[Dict[str, Any]]:
+        """Categorize a question with retry logic on errors.
 
         Args:
             question: The question to categorize.
@@ -395,19 +600,43 @@ class AnswerGenerator:
         if not self.categories:
             return None
 
-        try:
-            result_json, messages_list = define_category_prompt.run(question)
-            result = json.loads(result_json)
+        last_error = None
 
-            # Add messages for logging
-            messages_json = json.dumps(messages_list, ensure_ascii=False, indent=2)
-            result["messages"] = messages_json.replace("\\n", "\n")
+        for attempt in range(1, MAX_RETRY_ATTEMPTS_CATEGORY + 1):
+            try:
+                result_json, messages_list = define_category_prompt.run(question)
+                result = json.loads(result_json)
 
-            return result
+                # Add messages for logging
+                messages_json = json.dumps(messages_list, ensure_ascii=False, indent=2)
+                result["messages"] = messages_json.replace("\\n", "\n")
 
-        except Exception as e:
-            logger.error(f"Categorization failed: {e}")
-            return None
+                if attempt > 1:
+                    logger.info(f"Categorization succeeded on attempt {attempt}")
+
+                return result
+
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"Categorization attempt {attempt}/{MAX_RETRY_ATTEMPTS_CATEGORY} failed: {e}"
+                )
+
+                if attempt < MAX_RETRY_ATTEMPTS_CATEGORY:
+                    if RETRY_DELAY > 0:
+                        time.sleep(RETRY_DELAY)
+                    continue
+
+        # All attempts failed
+        logger.error(
+            f"All {MAX_RETRY_ATTEMPTS_CATEGORY} categorization attempts failed"
+        )
+        return {
+            "category": "Error",
+            "confidence": 0.0,
+            "reasoning": f"All retry attempts failed. Last error: {str(last_error)}",
+            "messages": "[]",
+        }
 
     def search_similar_questions(
         self, question: str, category: Optional[str] = None
@@ -449,10 +678,10 @@ class AnswerGenerator:
             logger.error(f"Search failed: {e}")
             return []
 
-    def generate_answer(
+    def generate_answer_with_retry(
         self, question: str, qa_pairs: List[Dict[str, str]]
     ) -> Optional[Dict[str, Any]]:
-        """Generate answer using LLM with context.
+        """Generate answer with retry logic on errors.
 
         Args:
             question: The question to answer.
@@ -461,21 +690,45 @@ class AnswerGenerator:
         Returns:
             Answer result dictionary or None on failure.
         """
-        try:
-            result_json, messages_list = get_answer_prompt.run(
-                user_question=question, qa_pairs=qa_pairs
-            )
-            result = json.loads(result_json)
+        last_error = None
 
-            # Add messages for logging
-            messages_json = json.dumps(messages_list, ensure_ascii=False, indent=2)
-            result["messages"] = messages_json.replace("\\n", "\n")
+        for attempt in range(1, MAX_RETRY_ATTEMPTS_ANSWER + 1):
+            try:
+                result_json, messages_list = get_answer_prompt.run(
+                    user_question=question, qa_pairs=qa_pairs
+                )
+                result = json.loads(result_json)
 
-            return result
+                # Add messages for logging
+                messages_json = json.dumps(messages_list, ensure_ascii=False, indent=2)
+                result["messages"] = messages_json.replace("\\n", "\n")
 
-        except Exception as e:
-            logger.error(f"Answer generation failed: {e}")
-            return None
+                if attempt > 1:
+                    logger.info(f"Answer generation succeeded on attempt {attempt}")
+
+                return result
+
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"Answer generation attempt {attempt}/{MAX_RETRY_ATTEMPTS_ANSWER} failed: {e}"
+                )
+
+                if attempt < MAX_RETRY_ATTEMPTS_ANSWER:
+                    if RETRY_DELAY > 0:
+                        time.sleep(RETRY_DELAY)
+                    continue
+
+        # All attempts failed
+        logger.error(
+            f"All {MAX_RETRY_ATTEMPTS_ANSWER} answer generation attempts failed"
+        )
+        return {
+            "answer": f"Failed to generate answer after {MAX_RETRY_ATTEMPTS_ANSWER} attempts. Last error: {str(last_error)}",
+            "confidence": 0.0,
+            "sources_used": [],
+            "messages": "[]",
+        }
 
     def process_row(
         self, sheet_q: Worksheet, sheet_log: Optional[Worksheet], row_idx: int
@@ -504,18 +757,19 @@ class AnswerGenerator:
             )
             logger.info(f"Processing row {row_idx}: {question_preview}")
 
-            # Step 1: Categorize question (optional)
+            # Step 1: Categorize question (optional) with retry
             category_result = None
             selected_category = None
 
             if self.categories:
-                category_result = self.categorize_question(question_str)
+                category_result = self.categorize_question_with_retry(question_str)
                 if category_result:
                     selected_category = category_result.get("category")
-                    logger.info(
-                        f"Categorized as: {selected_category} "
-                        f"(confidence: {category_result.get('confidence', 0):.2f})"
-                    )
+                    if selected_category != "Error":
+                        logger.info(
+                            f"Categorized as: {selected_category} "
+                            f"(confidence: {category_result.get('confidence', 0):.2f})"
+                        )
 
             # Step 2: Search similar questions
             similar_questions = self.search_similar_questions(
@@ -538,8 +792,8 @@ class AnswerGenerator:
                 for result in similar_questions
             ]
 
-            # Step 4: Generate answer
-            answer_result = self.generate_answer(question_str, qa_pairs)
+            # Step 4: Generate answer with retry
+            answer_result = self.generate_answer_with_retry(question_str, qa_pairs)
 
             if not answer_result:
                 logger.error(f"Failed to generate answer for row {row_idx}")
@@ -616,6 +870,8 @@ class AnswerGenerator:
             logger.info("=" * 70)
             logger.info("Starting Answer Generator Script")
             logger.info(f"Log Answer: {'ENABLED' if LOG_ANSWER else 'DISABLED'}")
+            logger.info(f"Max Retry Attempts (Category): {MAX_RETRY_ATTEMPTS_CATEGORY}")
+            logger.info(f"Max Retry Attempts (Answer): {MAX_RETRY_ATTEMPTS_ANSWER}")
             logger.info("=" * 70)
 
             # Check for resume state
@@ -625,14 +881,23 @@ class AnswerGenerator:
                 # Resume from previous run
                 logger.info("Resuming from previous run...")
                 self.output_file = Path(resume_state["output_file"])
+
+                # Extract timestamp from filename for log file
+                filename = self.output_file.stem  # Q_YYYY-MM-DD_HHMMSS
+                if filename.startswith("Q_"):
+                    self.timestamp = filename[2:]  # Remove "Q_" prefix
+
+                # Initialize file logger for resumed session
+                if LOG_TO_FILE:
+                    log_file = OUTPUT_DIR / f"Q_{self.timestamp}.log"
+                    self.dual_logger = DualLogger(log_file)
+                    self._update_logger()
+                    logger.info("=" * 70)
+                    logger.info("RESUMED SESSION")
+                    logger.info("=" * 70)
+
                 self.workbook = openpyxl.load_workbook(self.output_file)
                 start_from_row = resume_state["last_row"] + 1
-
-                # Extract timestamp from filename
-                filename = self.output_file.stem
-                if filename.startswith("Q_"):
-                    self.timestamp = filename[2:]
-
             else:
                 # Fresh start
                 logger.info("Starting fresh processing...")
@@ -774,6 +1039,10 @@ class AnswerGenerator:
             logger.info(f"Output file: {self.output_file}")
             if LOG_ANSWER and sheet_log:
                 logger.info(f"Detailed logs saved in '{SHEET_LOG_PREFIX}' sheet")
+                logger.info(f"Model parameters saved in '{SHEET_LOG_PARAMS}' sheet")
+            if LOG_TO_FILE:
+                log_path = OUTPUT_DIR / f"Q_{self.timestamp}.log"
+                logger.info(f"Text log saved to: {log_path}")
             logger.info("=" * 70)
 
             return True
@@ -817,6 +1086,10 @@ class AnswerGenerator:
                     self.db_store.close()
                 except Exception:
                     pass
+
+            # Close log file handler
+            if self.dual_logger:
+                self.dual_logger.close()
 
 
 def main():
