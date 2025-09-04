@@ -20,7 +20,7 @@
 prompts/
 ├── __init__.py                    # Инициализация пакета
 ├── base_prompt.py                 # Базовый шаблон для создания промптов
-├── define_category_prompt.py      # Категоризация вопросов
+├── get_category_prompt.py      # Категоризация вопросов
 ├── get_answer_prompt.py           # Генерация ответов на вопросы
 └── README.md                      # Документация
 ```
@@ -34,7 +34,7 @@ prompts/
 
 ### Публичные функции
 
-#### define_category_prompt.py
+#### get_category_prompt.py
 
 **`update_system_prompt(categories: Dict[str, str]) -> str`**
 - Инициализирует систему категоризации
@@ -82,9 +82,9 @@ prompts/
 
 Модуль `prompts` используется в основных скриптах системы:
 
-1. **category_filler.py** - использует `define_category_prompt` для определения категорий исторических вопросов
+1. **category_filler.py** - использует `get_category_prompt` для определения категорий исторических вопросов
 2. **answer_generator.py** - использует оба модуля:
-   - `define_category_prompt` для фильтрации по категориям
+   - `get_category_prompt` для фильтрации по категориям
    - `get_answer_prompt` для генерации ответов на основе контекста
 
 ## Тестовый запуск
@@ -93,7 +93,7 @@ prompts/
 
 ### Тест категоризации:
 ```bash
-python -m prompts.define_category_prompt
+python -m prompts.get_category_prompt
 ```
 
 ### Тест генерации ответов:

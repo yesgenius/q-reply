@@ -34,10 +34,14 @@ Usage:
 
 import json
 import logging
-from collections.abc import Generator as GeneratorType
-from typing import Any, Dict, Generator, List, Optional, Union
+from collections.abc import (
+    Generator,
+    Generator as GeneratorType,
+)
+from typing import Any
 
 from gigachat.client import GigaChatClient
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,7 @@ logger = logging.getLogger(__name__)
 llm = GigaChatClient()
 
 # Default model parameters
-params: Dict[str, Any] = {
+params: dict[str, Any] = {
     "model": "GigaChat",
     "temperature": None,
     "top_p": None,
@@ -58,8 +62,8 @@ params: Dict[str, Any] = {
 # For base_prompt.py: keep as None/empty for lazy initialization
 # For specific prompts: can initialize with static values
 # _system_prompt: Optional[str] = "You are a specialized assistant..."
-_system_prompt: Optional[str] = None  # Or: "You are a specialized assistant..."
-_chat_history: List[Dict[str, str]] = []  # Or: [{"role": "system", "content": "..."}]
+_system_prompt: str | None = None  # Or: "You are a specialized assistant..."
+_chat_history: list[dict[str, str]] = []  # Or: [{"role": "system", "content": "..."}]
 
 # Public variable to store formatted messages as JSON string
 messages: str = "[]"
@@ -75,7 +79,7 @@ messages: str = "[]"
 # ]
 
 
-def _update_messages(messages_list: List[Dict[str, str]]) -> None:
+def _update_messages(messages_list: list[dict[str, str]]) -> None:
     """Update the public messages variable with formatted JSON.
 
     This is an internal function that updates the module-level messages
@@ -133,7 +137,7 @@ def _generate_system_prompt(**kwargs: Any) -> str:
     return base_prompt
 
 
-def _generate_chat_history(**kwargs: Any) -> List[Dict[str, str]]:
+def _generate_chat_history(**kwargs: Any) -> list[dict[str, str]]:
     """Generate chat history with dynamic content.
 
     This is an internal method that creates the chat history.
@@ -231,7 +235,7 @@ def update_system_prompt(**kwargs: Any) -> str:
     return _system_prompt
 
 
-def update_chat_history(**kwargs: Any) -> List[Dict[str, str]]:
+def update_chat_history(**kwargs: Any) -> list[dict[str, str]]:
     """Update or retrieve the cached chat history.
 
     Updates the global chat history if kwargs are provided,
@@ -277,7 +281,7 @@ def update_chat_history(**kwargs: Any) -> List[Dict[str, str]]:
     return _chat_history.copy()  # Return copy to prevent external modifications
 
 
-def add_to_chat_history(message: Dict[str, str]) -> None:
+def add_to_chat_history(message: dict[str, str]) -> None:
     """Add a single message to chat history.
 
     Utility function to append messages to existing history
@@ -345,7 +349,7 @@ def reset_to_defaults() -> None:
     logger.debug("Reset to module defaults")
 
 
-def get_messages(user_question: str) -> List[Dict[str, str]]:
+def get_messages(user_question: str) -> list[dict[str, str]]:
     """Build complete message list for LLM request.
 
     Combines cached system prompt, chat history, and user question
@@ -392,8 +396,8 @@ def get_messages(user_question: str) -> List[Dict[str, str]]:
 
 
 def run(
-    user_question: str, custom_params: Optional[Dict[str, Any]] = None
-) -> Union[str, Generator[Dict[str, Any], None, None]]:
+    user_question: str, custom_params: dict[str, Any] | None = None
+) -> str | Generator[dict[str, Any], None, None]:
     """Execute prompt with the configured LLM.
 
     Uses cached system prompt and chat history to build messages,
@@ -446,14 +450,11 @@ def run(
             # For streaming, return generator as-is
             if isinstance(response, GeneratorType):
                 return response
-            else:
-                raise RuntimeError("Expected generator for streaming response")
-        else:
-            # For non-streaming, extract content from response
-            if isinstance(response, dict) and "choices" in response:
-                return response["choices"][0]["message"]["content"]
-            else:
-                raise RuntimeError(f"Unexpected response format: {type(response)}")
+            raise RuntimeError("Expected generator for streaming response")
+        # For non-streaming, extract content from response
+        if isinstance(response, dict) and "choices" in response:
+            return response["choices"][0]["message"]["content"]
+        raise RuntimeError(f"Unexpected response format: {type(response)}")
 
     except Exception as e:
         logger.error(f"LLM request failed: {e}")

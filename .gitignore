@@ -67,12 +67,18 @@ htmlcov/
 pytest_cache/
 
 # --- Misc ---
-.work/
+**/.work/
 *.bak
 *.swp
 *.swo
+qa.duckdb
 
-# ==============================================
-# Exclude all work directories at any level
-# ==============================================
-**/.work/
+# Ignore all Excel files
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+
+# But keep these specific files
+!Q.origin.xlsx
+!QA.origin.xlsx

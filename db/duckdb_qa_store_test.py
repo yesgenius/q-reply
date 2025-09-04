@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List
 
 import numpy as np
 
@@ -27,6 +26,7 @@ import numpy as np
 # If this file is appended to the same module where QADatabaseStore is defined,
 # the import can be skipped and QADatabaseStore used directly.
 from db.duckdb_qa_store import QADatabaseStore  # type: ignore[import]
+
 
 # -----------------------------------------------------------------------------
 # Logging
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------
 
 
-def generate_fake_embedding(text: str, size: int) -> List[float]:
+def generate_fake_embedding(text: str, size: int) -> list[float]:
     """Generate a deterministic, normalized embedding for testing.
 
     The goal is NOT to mimic real embeddings but to obtain stable vectors with
@@ -428,7 +428,7 @@ def main() -> None:
         "комиссия $3.99 за снятие наличных",
         "комиссия $3,99 за снятие наличных",
     ]
-    for src, exp in zip(inputs, expected):
+    for src, exp in zip(inputs, expected, strict=False):
         got = db.preprocess_text(src)
         assert got == exp, f"Preprocess mismatch: '{got}' != '{exp}'"
         logger.info(" - '%s' -> '%s'", src, got)

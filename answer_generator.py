@@ -24,23 +24,24 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+
 # Import required modules
 try:
     from db import duckdb_qa_store
     from embeddings import base_embedding
-    from prompts import define_category_prompt, get_answer_prompt
+    from prompts import get_category_prompt, get_answer_prompt
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
     print("Ensure all modules are in the correct paths:")
     print("  - db/duckdb_qa_store.py")
     print("  - embeddings/base_embedding.py")
-    print("  - prompts/define_category_prompt.py")
+    print("  - prompts/get_category_prompt.py")
     print("  - prompts/get_answer_prompt.py")
     sys.exit(1)
 
@@ -102,52 +103,89 @@ RESUME_FILE = Path(".answer_generator_resume.json")  # Hidden file for resume st
 # ============================================================================
 
 
-class DualLogger:
-    """Logger that writes to both console and file."""
+def setup_logging(log_file: Path | None = None) -> None:
+    """Configure unified logging for all modules.
 
-    def __init__(self, log_file: Optional[Path] = None):
-        """Initialize dual logger.
+    Sets up consistent logging configuration for the main script and all imported
+    modules to ensure uniform formatting and output handling across the entire
+    application.
 
-        Args:
-            log_file: Path to log file. If None, only console logging.
-        """
-        self.log_file = log_file
-        self.file_handler = None
+    Args:
+        log_file: Optional path to log file. If provided, logs will be written
+            to both console and file.
+    """
+    # Create formatter with consistent format
+    formatter = logging.Formatter(
+        "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
+    )
 
-        # Configure main logger
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(LOG_LEVEL)
+    # Get root logger to configure all loggers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(LOG_LEVEL)
 
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(LOG_LEVEL)
-        formatter = logging.Formatter(
-            "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
-        )
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+    # Remove any existing handlers to avoid duplicates
+    root_logger.handlers.clear()
 
-        # File handler if requested
-        if log_file and LOG_TO_FILE:
-            try:
-                log_file.parent.mkdir(parents=True, exist_ok=True)
-                self.file_handler = logging.FileHandler(log_file, encoding="utf-8")
-                self.file_handler.setLevel(LOG_LEVEL)
-                self.file_handler.setFormatter(formatter)
-                self.logger.addHandler(self.file_handler)
-                self.logger.info(f"Logging to file: {log_file}")
-            except Exception as e:
-                self.logger.warning(f"Could not create log file: {e}")
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(LOG_LEVEL)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
 
-    def close(self):
-        """Close file handler if exists."""
-        if self.file_handler:
-            self.file_handler.close()
-            self.logger.removeHandler(self.file_handler)
+    # File handler if requested
+    if log_file and LOG_TO_FILE:
+        try:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler.setLevel(LOG_LEVEL)
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+
+            # Log to confirm file logging is active
+            logger = logging.getLogger(__name__)
+            logger.info(f"Logging to file: {log_file}")
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not create log file: {e}")
 
 
-# Global logger instance (will be initialized in AnswerGenerator)
+# Initialize module logger
 logger = logging.getLogger(__name__)
+
+
+def format_json_for_excel(data: Any) -> str:
+    """Format JSON data for Excel cell display.
+
+    Formats JSON data (messages or raw responses) for readable display
+    in Excel cells while preserving the complete data structure.
+
+    Args:
+        data: JSON-serializable data (dict, list, or already stringified JSON).
+
+    Returns:
+        Formatted JSON string suitable for Excel cell display.
+    """
+    try:
+        # If already a string, try to parse and re-format
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                # Already formatted or not JSON, return as-is
+                return str(data)  # Explicit string conversion
+
+        # Format with indentation and ensure_ascii=False for readability
+        formatted = json.dumps(data, ensure_ascii=False, indent=2)
+
+        # Replace escaped newlines with actual newlines for Excel
+        formatted = formatted.replace("\\n", "\n")
+
+        return formatted
+
+    except Exception as e:
+        logger.warning(f"Could not format JSON for Excel: {e}")
+        # Return string representation as fallback
+        return str(data)
 
 
 class AnswerGenerator:
@@ -155,21 +193,14 @@ class AnswerGenerator:
 
     def __init__(self):
         """Initialize the answer generator."""
-        self.workbook: Optional[Workbook] = None
-        self.output_file: Optional[Path] = None
-        self.db_store: Optional[duckdb_qa_store.QADatabaseStore] = None
-        self.categories: Dict[str, str] = {}
-        self.conference_topic: Optional[str] = None
+        self.workbook: Workbook | None = None
+        self.output_file: Path | None = None
+        self.db_store: duckdb_qa_store.QADatabaseStore | None = None
+        self.categories: dict[str, str] = {}
+        self.conference_topic: str | None = None
         self.processed_count: int = 0
-        self.resume_state: Dict = {}
+        self.resume_state: dict = {}
         self.timestamp: str = ""
-        self.dual_logger: Optional[DualLogger] = None
-
-    def _update_logger(self) -> None:
-        """Update global logger reference when dual logger is available."""
-        global logger
-        if self.dual_logger:
-            logger = self.dual_logger.logger
 
     def validate_input_files(self) -> bool:
         """Validate that required input files exist and are accessible.
@@ -190,7 +221,7 @@ class AnswerGenerator:
             logger.error(f"Cannot access file: {INPUT_FILE_Q}")
             logger.error("The file might be open in Excel or another program.")
             return False
-        except IOError as e:
+        except OSError as e:
             logger.error(f"Cannot read file {INPUT_FILE_Q}: {e}")
             return False
 
@@ -214,7 +245,7 @@ class AnswerGenerator:
 
         return True
 
-    def load_conference_topic(self, workbook: Workbook) -> Optional[str]:
+    def load_conference_topic(self, workbook: Workbook) -> str | None:
         """Load conference topic from T sheet if available.
 
         Args:
@@ -236,11 +267,10 @@ class AnswerGenerator:
             topic_str = str(topic).strip()
             logger.info(f"Conference topic loaded: {topic_str[:100]}...")
             return topic_str
-        else:
-            logger.info("No conference topic found in T.A2, proceeding without it")
-            return None
+        logger.info("No conference topic found in T.A2, proceeding without it")
+        return None
 
-    def load_categories_from_qa(self) -> Dict[str, str]:
+    def load_categories_from_qa(self) -> dict[str, str]:
         """Load category dictionary from QA.xlsx if available.
 
         Returns:
@@ -357,7 +387,7 @@ class AnswerGenerator:
 
         # Add separator for category model parameters (always show if module exists)
         try:
-            category_params = getattr(define_category_prompt, "params", {})
+            category_params = getattr(get_category_prompt, "params", {})
             if category_params:
                 row += 1
                 params_sheet.cell(
@@ -440,7 +470,7 @@ class AnswerGenerator:
 
         logger.info(f"Created '{SHEET_LOG_PARAMS}' sheet with model parameters")
 
-    def create_output_file(self) -> Tuple[Workbook, Path]:
+    def create_output_file(self) -> tuple[Workbook, Path]:
         """Create output file with timestamp.
 
         Returns:
@@ -453,17 +483,18 @@ class AnswerGenerator:
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         output_file = OUTPUT_DIR / f"Q_{self.timestamp}.xlsx"
 
-        # Initialize file logger
+        # Initialize unified logging for all modules
         if LOG_TO_FILE:
             log_file = OUTPUT_DIR / f"Q_{self.timestamp}.log"
-            self.dual_logger = DualLogger(log_file)
-            self._update_logger()
+            setup_logging(log_file)
+        else:
+            setup_logging()
 
         logger.info(f"Copying {INPUT_FILE_Q} to {output_file}")
 
         # Copy file to preserve structure
         shutil.copy2(INPUT_FILE_Q, output_file)
-        logger.info(f"File copied successfully")
+        logger.info("File copied successfully")
 
         # Open the copied file for modifications
         wb = openpyxl.load_workbook(output_file)
@@ -498,22 +529,26 @@ class AnswerGenerator:
             # Create new LOG_ANSWER sheet
             log_sheet = wb.create_sheet(log_sheet_name)
 
-            # Add headers to LOG_ANSWER sheet with corrected names
+            # Add headers to LOG_ANSWER sheet with raw response columns
             headers = [
                 "Вопрос",
                 "category",
                 "category_confidence",
                 "category_reasoning",
                 "category_messages",
+                "category_response",  # New column for raw category response
                 "answer",
                 "answer_confidence",
                 "answer_sources_used",
                 "answer_messages",
+                "answer_response",  # New column for raw answer response
             ]
             for col_idx, header in enumerate(headers, 1):
                 log_sheet.cell(row=1, column=col_idx, value=header)
 
-            logger.info(f"Created '{log_sheet_name}' sheet with headers")
+            logger.info(
+                f"Created '{log_sheet_name}' sheet with headers including raw responses"
+            )
 
             # Create LOG_ANSWER_PARAMS sheet
             self.create_log_params_sheet(wb)
@@ -552,7 +587,7 @@ class AnswerGenerator:
         except Exception as e:
             logger.warning(f"Could not save resume state: {e}")
 
-    def load_resume_state(self) -> Optional[Dict]:
+    def load_resume_state(self) -> dict[Any, Any] | None:
         """Load resume state if exists.
 
         Returns:
@@ -562,8 +597,8 @@ class AnswerGenerator:
             return None
 
         try:
-            with open(RESUME_FILE, "r", encoding="utf-8") as f:
-                state = json.load(f)
+            with open(RESUME_FILE, encoding="utf-8") as f:
+                state: dict[Any, Any] = json.load(f)  # Explicit type annotation
 
             # Validate output file still exists
             output_path = Path(state["output_file"])
@@ -571,9 +606,8 @@ class AnswerGenerator:
                 logger.info(f"Found resume state from {state['timestamp']}")
                 logger.info(f"Will continue from row {state['last_row'] + 1}")
                 return state
-            else:
-                logger.warning("Resume output file not found, starting fresh")
-                return None
+            logger.warning("Resume output file not found, starting fresh")
+            return None
 
         except Exception as e:
             logger.warning(f"Could not load resume state: {e}")
@@ -588,7 +622,7 @@ class AnswerGenerator:
             except Exception as e:
                 logger.warning(f"Could not clear resume state: {e}")
 
-    def categorize_question_with_retry(self, question: str) -> Optional[Dict[str, Any]]:
+    def categorize_question_with_retry(self, question: str) -> dict[str, Any] | None:
         """Categorize a question with retry logic on errors.
 
         Args:
@@ -604,17 +638,40 @@ class AnswerGenerator:
 
         for attempt in range(1, MAX_RETRY_ATTEMPTS_CATEGORY + 1):
             try:
-                result_json, messages_list = define_category_prompt.run(question)
-                result = json.loads(result_json)
+                # Check if get_category_prompt.run() returns 2 or 3 values
+                result = get_category_prompt.run(question)
 
-                # Add messages for logging
-                messages_json = json.dumps(messages_list, ensure_ascii=False, indent=2)
-                result["messages"] = messages_json.replace("\\n", "\n")
+                # Handle both old (2-tuple) and new (3-tuple) return formats
+                if isinstance(result, tuple):
+                    if len(result) == 2:
+                        result_json, messages_list = result
+                        raw_response = None
+                    elif len(result) == 3:
+                        result_json, messages_list, raw_response = result
+                    else:
+                        raise ValueError(
+                            f"Unexpected return format from get_category_prompt.run: {len(result)} values"
+                        )
+                else:
+                    raise ValueError(
+                        f"Unexpected return type from get_category_prompt.run: {type(result)}"
+                    )
+
+                result_dict: dict[str, Any] = json.loads(result_json)  # Explicit type
+
+                # Format messages for logging
+                result_dict["messages"] = format_json_for_excel(messages_list)
+
+                # Add raw response if available
+                if raw_response is not None:
+                    result_dict["response"] = format_json_for_excel(raw_response)
+                else:
+                    result_dict["response"] = ""
 
                 if attempt > 1:
                     logger.info(f"Categorization succeeded on attempt {attempt}")
 
-                return result
+                return result_dict
 
             except Exception as e:
                 last_error = e
@@ -634,13 +691,14 @@ class AnswerGenerator:
         return {
             "category": "Error",
             "confidence": 0.0,
-            "reasoning": f"All retry attempts failed. Last error: {str(last_error)}",
+            "reasoning": f"All retry attempts failed. Last error: {last_error!s}",
             "messages": "[]",
+            "response": "",
         }
 
     def search_similar_questions(
-        self, question: str, category: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, question: str, category: str | None = None
+    ) -> list[dict[str, Any]]:
         """Search for similar questions in the database.
 
         Args:
@@ -679,8 +737,8 @@ class AnswerGenerator:
             return []
 
     def generate_answer_with_retry(
-        self, question: str, qa_pairs: List[Dict[str, str]]
-    ) -> Optional[Dict[str, Any]]:
+        self, question: str, qa_pairs: list[dict[str, str]]
+    ) -> dict[str, Any] | None:
         """Generate answer with retry logic on errors.
 
         Args:
@@ -694,14 +752,17 @@ class AnswerGenerator:
 
         for attempt in range(1, MAX_RETRY_ATTEMPTS_ANSWER + 1):
             try:
-                result_json, messages_list = get_answer_prompt.run(
+                # get_answer_prompt.run now returns 3 values
+                result_json, messages_list, raw_response = get_answer_prompt.run(
                     user_question=question, qa_pairs=qa_pairs
                 )
-                result = json.loads(result_json)
+                result: dict[str, Any] = json.loads(result_json)  # Explicit type
 
-                # Add messages for logging
-                messages_json = json.dumps(messages_list, ensure_ascii=False, indent=2)
-                result["messages"] = messages_json.replace("\\n", "\n")
+                # Format messages for logging
+                result["messages"] = format_json_for_excel(messages_list)
+
+                # Format raw response for logging
+                result["response"] = format_json_for_excel(raw_response)
 
                 if attempt > 1:
                     logger.info(f"Answer generation succeeded on attempt {attempt}")
@@ -724,14 +785,15 @@ class AnswerGenerator:
             f"All {MAX_RETRY_ATTEMPTS_ANSWER} answer generation attempts failed"
         )
         return {
-            "answer": f"Failed to generate answer after {MAX_RETRY_ATTEMPTS_ANSWER} attempts. Last error: {str(last_error)}",
+            "answer": f"Failed to generate answer after {MAX_RETRY_ATTEMPTS_ANSWER} attempts. Last error: {last_error!s}",
             "confidence": 0.0,
             "sources_used": [],
             "messages": "[]",
+            "response": "",
         }
 
     def process_row(
-        self, sheet_q: Worksheet, sheet_log: Optional[Worksheet], row_idx: int
+        self, sheet_q: Worksheet, sheet_log: Worksheet | None, row_idx: int
     ) -> bool:
         """Process a single row from Q sheet.
 
@@ -815,41 +877,67 @@ class AnswerGenerator:
                 sheet_q.cell(row=row_idx, column=q_col, value=result["question"])
                 sheet_q.cell(row=row_idx, column=a_col, value=result["answer"])
 
-            # Step 6: Write to LOG_ANSWER sheet if enabled
+            # Step 6: Write to LOG_ANSWER sheet if enabled (with raw responses)
             if LOG_ANSWER and sheet_log:
-                sheet_log.cell(row=row_idx, column=1, value=question_str)
+                col = 1
+                sheet_log.cell(row=row_idx, column=col, value=question_str)
+                col += 1
 
                 if category_result:
                     sheet_log.cell(
-                        row=row_idx, column=2, value=category_result.get("category", "")
+                        row=row_idx,
+                        column=col,
+                        value=category_result.get("category", ""),
                     )
+                    col += 1
                     sheet_log.cell(
                         row=row_idx,
-                        column=3,
+                        column=col,
                         value=category_result.get("confidence", ""),
                     )
+                    col += 1
                     sheet_log.cell(
                         row=row_idx,
-                        column=4,
+                        column=col,
                         value=category_result.get("reasoning", ""),
                     )
+                    col += 1
                     sheet_log.cell(
-                        row=row_idx, column=5, value=category_result.get("messages", "")
+                        row=row_idx,
+                        column=col,
+                        value=category_result.get("messages", ""),
                     )
+                    col += 1
+                    sheet_log.cell(
+                        row=row_idx,
+                        column=col,
+                        value=category_result.get("response", ""),
+                    )
+                    col += 1
+                else:
+                    # Skip category columns if no categorization
+                    col += 5
 
                 sheet_log.cell(
-                    row=row_idx, column=6, value=answer_result.get("answer", "")
+                    row=row_idx, column=col, value=answer_result.get("answer", "")
                 )
+                col += 1
                 sheet_log.cell(
-                    row=row_idx, column=7, value=answer_result.get("confidence", "")
+                    row=row_idx, column=col, value=answer_result.get("confidence", "")
                 )
+                col += 1
                 sheet_log.cell(
                     row=row_idx,
-                    column=8,
+                    column=col,
                     value=str(answer_result.get("sources_used", [])),
                 )
+                col += 1
                 sheet_log.cell(
-                    row=row_idx, column=9, value=answer_result.get("messages", "")
+                    row=row_idx, column=col, value=answer_result.get("messages", "")
+                )
+                col += 1
+                sheet_log.cell(
+                    row=row_idx, column=col, value=answer_result.get("response", "")
                 )
 
             logger.info(f"Row {row_idx} processed successfully")
@@ -867,6 +955,9 @@ class AnswerGenerator:
             True if execution completed successfully, False otherwise.
         """
         try:
+            # Setup initial logging to console only
+            setup_logging()
+
             logger.info("=" * 70)
             logger.info("Starting Answer Generator Script")
             logger.info(f"Log Answer: {'ENABLED' if LOG_ANSWER else 'DISABLED'}")
@@ -887,11 +978,10 @@ class AnswerGenerator:
                 if filename.startswith("Q_"):
                     self.timestamp = filename[2:]  # Remove "Q_" prefix
 
-                # Initialize file logger for resumed session
+                # Re-initialize unified logging for resumed session
                 if LOG_TO_FILE:
                     log_file = OUTPUT_DIR / f"Q_{self.timestamp}.log"
-                    self.dual_logger = DualLogger(log_file)
-                    self._update_logger()
+                    setup_logging(log_file)
                     logger.info("=" * 70)
                     logger.info("RESUMED SESSION")
                     logger.info("=" * 70)
@@ -910,7 +1000,7 @@ class AnswerGenerator:
                     logger.error("=" * 70)
                     return False
 
-                # Step 2: Create output file
+                # Step 2: Create output file (this also sets up file logging)
                 logger.info("Step 2: Creating output file...")
                 self.workbook, self.output_file = self.create_output_file()
 
@@ -927,7 +1017,7 @@ class AnswerGenerator:
             if self.categories:
                 logger.info(f"Categories loaded: {', '.join(self.categories.keys())}")
                 # Initialize category prompt
-                define_category_prompt.update_system_prompt(categories=self.categories)
+                get_category_prompt.update_system_prompt(categories=self.categories)
                 logger.info("Category system initialized")
 
             # Step 5: Initialize database connection
@@ -973,7 +1063,7 @@ class AnswerGenerator:
             logger.info("-" * 70)
 
             # Process each row
-            successfully_processed: List[int] = []
+            successfully_processed: list[int] = []
 
             for idx, row_idx in enumerate(rows_to_process, 1):
                 # Process row
@@ -1086,10 +1176,6 @@ class AnswerGenerator:
                     self.db_store.close()
                 except Exception:
                     pass
-
-            # Close log file handler
-            if self.dual_logger:
-                self.dual_logger.close()
 
 
 def main():

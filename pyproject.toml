@@ -1,0 +1,278 @@
+# ============================
+# УНИВЕРСАЛЬНАЯ КОНФИГУРАЦИЯ ЛИНТЕРОВ
+# Python 3.12+ | Ruff 0.12+ | MyPy 1.0+
+# Все правила проверены и работают!
+# ============================
+
+# ============================
+# Ruff - All-in-one линтер и форматтер
+# ============================
+[tool.ruff]
+# Целевая версия Python
+target-version = "py312"
+
+# Длина строки (совместимо с Black)
+line-length = 88
+
+# Автоматическое исправление
+fix = true
+
+# Исключения (добавьте свои)
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    "build",
+    "dist",
+    "*.egg-info",
+    "node_modules",
+    "migrations",
+]
+
+[tool.ruff.lint]
+# ВСЕ эти правила проверены и работают в Ruff 0.12.11
+select = [
+    # === ОСНОВНЫЕ (минимальный набор) ===
+    "F",      # Pyflakes - ошибки Python
+    "E",      # pycodestyle - ошибки стиля кода
+    "W",      # pycodestyle - предупреждения стиля
+    "I",      # isort - сортировка импортов
+    "UP",     # pyupgrade - современный Python синтаксис
+    "B",      # flake8-bugbear - поиск багов
+    "SIM",    # flake8-simplify - упрощение кода
+    "RUF",    # Ruff-specific - правила самого Ruff
+
+    # === КАЧЕСТВО КОДА (рекомендуется) ===
+    "C90",    # mccabe - сложность кода
+    "N",      # pep8-naming - правила именования
+    "A",      # flake8-builtins - переопределение встроенных
+    "C4",     # flake8-comprehensions - лучшие comprehensions
+    "RET",    # flake8-return - оптимизация return
+    "ARG",    # flake8-unused-arguments - неиспользуемые аргументы
+    "PTH",    # flake8-use-pathlib - используй pathlib вместо os.path
+
+    # === БЕЗОПАСНОСТЬ И ПРОИЗВОДИТЕЛЬНОСТЬ ===
+    "S",      # flake8-bandit - безопасность
+    "PERF",   # perflint - производительность
+    "ASYNC",  # flake8-async - правила для async кода
+
+    # === ДОПОЛНИТЕЛЬНЫЕ (опционально) ===
+    "DTZ",    # flake8-datetimez - timezone-aware datetime
+    "EM",     # flake8-errmsg - сообщения об ошибках
+    "ISC",    # flake8-implicit-str-concat - конкатенация строк
+    "PIE",    # flake8-pie - разные улучшения
+    "T20",    # flake8-print - находит print() в проде
+    "Q",      # flake8-quotes - стиль кавычек
+    "TCH",    # flake8-type-checking - оптимизация импортов для типов
+    "PL",     # Pylint - подмножество правил Pylint
+    "TRY",    # tryceratops - обработка исключений
+    "FLY",    # flynt - конвертация в f-strings
+]
+
+# Игнорируемые правила (разумные исключения)
+ignore = [
+    # Форматирование
+    "E501",   # Длина строки - форматтер сам решит
+    "W191",   # Табы - если используете
+
+    # Спорные правила
+    "B008",   # Вызов функций в значениях по умолчанию (нужно для FastAPI/Click)
+    "B905",   # zip без strict= (Python 3.10+)
+
+    # Слишком строгие
+    "S101",   # assert - нужен в тестах
+    "S105",   # Hardcoded passwords - много false positives
+    "S106",   # Hardcoded passwords - много false positives
+
+    # Для постепенной миграции
+    "UP007",  # Optional[X] vs X | None - если еще не готовы к новому синтаксису
+
+    # Сложность (настройте под проект)
+    "PLR0913", # Слишком много аргументов
+    "PLR0912", # Слишком много веток
+    "PLR0915", # Слишком много statements
+    "C901",    # Слишком сложная функция
+
+    # Exceptions
+    "TRY003",  # Длинные сообщения в исключениях
+    "EM101",   # Сырые строки в исключениях
+    "EM102",   # f-strings в исключениях
+]
+
+# Автоисправление
+fixable = ["ALL"]
+unfixable = ["F841"]  # Не удалять unused variables автоматически
+
+# Правила для конкретных файлов
+[tool.ruff.lint.per-file-ignores]
+# Тесты
+"test_*.py" = ["S101", "ARG", "PLR2004"]
+"tests/**/*.py" = ["S101", "ARG", "PLR2004"]
+"*_test.py" = ["S101", "ARG", "PLR2004"]
+
+# Конфигурационные файлы
+"settings.py" = ["E501", "S105"]
+"*/settings/*.py" = ["E501", "S105", "F405"]
+"config.py" = ["E501"]
+"conf.py" = ["E501"]
+
+# Скрипты
+"scripts/*.py" = ["T20"]  # print() разрешен в скриптах
+
+# __init__ файлы
+"__init__.py" = ["F401", "F403"]
+
+# Миграции
+"*/migrations/*.py" = ["E501", "ARG"]
+
+[tool.ruff.lint.isort]
+# Сортировка импортов
+combine-as-imports = true
+force-wrap-aliases = true
+lines-after-imports = 2
+# known-first-party = ["q-reply"]
+
+[tool.ruff.lint.mccabe]
+# Максимальная сложность функций
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+# Настройки в стиле Pylint
+max-args = 6            # Максимум аргументов функции
+max-branches = 12       # Максимум веток
+max-returns = 6         # Максимум return в функции
+max-statements = 50     # Максимум statements в функции
+
+[tool.ruff.format]
+# Форматирование (Black-совместимое)
+quote-style = "double"          # Двойные кавычки
+indent-style = "space"          # Пробелы для отступов
+line-ending = "auto"            # LF на Unix, CRLF на Windows
+skip-magic-trailing-comma = false
+docstring-code-format = true    # Форматировать код в docstrings
+
+# ============================
+# MyPy - Статическая типизация
+# ============================
+[tool.mypy]
+# Версия Python
+python_version = "3.12"
+
+# === СТРОГОСТЬ (выберите уровень) ===
+
+# Вариант 1: НАЧАЛЬНЫЙ (для legacy кода)
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+
+# Вариант 2: СРЕДНИЙ (рекомендуется)
+# warn_return_any = true
+# warn_unused_configs = true
+# disallow_untyped_defs = false    # Постепенная типизация
+# check_untyped_defs = true
+# disallow_any_generics = false
+# strict_optional = true
+# warn_redundant_casts = true
+# warn_unused_ignores = true
+# warn_no_return = true
+# strict_equality = true
+
+# Вариант 3: СТРОГИЙ (для нового кода)
+# strict = true
+# disallow_any_generics = true
+# disallow_untyped_calls = true
+# no_implicit_reexport = true
+
+# Форматирование вывода
+pretty = true
+show_error_codes = true
+show_column_numbers = true
+color_output = true
+
+# Поиск модулей
+namespace_packages = true
+explicit_package_bases = true
+
+# Плагины (раскомментируйте нужные)
+# plugins = [
+#     "pydantic.mypy",
+#     "sqlalchemy.ext.mypy.plugin",
+# ]
+
+# Игнорирование импортов популярных библиотек
+[[tool.mypy.overrides]]
+module = [
+    "pytest.*",
+    "numpy.*",
+    "pandas.*",
+    "matplotlib.*",
+    "seaborn.*",
+    "sklearn.*",
+    "scipy.*",
+    "requests.*",
+    "aiohttp.*",
+    "httpx.*",
+    "fastapi.*",
+    "flask.*",
+    "django.*",
+    "sqlalchemy.*",
+    "alembic.*",
+    "redis.*",
+    "celery.*",
+    "boto3.*",
+    "PIL.*",
+    "cv2.*",
+]
+ignore_missing_imports = true
+
+# Менее строгие правила для тестов
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+# ============================
+# Pytest (опционально)
+# ============================
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--verbose",
+    "--tb=short",
+    "-ra",
+]
+
+# ============================
+# Coverage (опционально)
+# ============================
+[tool.coverage.run]
+branch = true
+source = ["."]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/.venv/*",
+    "*/venv/*",
+    "*/migrations/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "raise NotImplementedError",
+]

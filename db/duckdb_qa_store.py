@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 import duckdb
 import numpy as np
+
 
 # ---------------------------------------------------------------------------
 # Public constants (keep small, explicit surface)
@@ -122,7 +124,7 @@ class QADatabaseStore:
         """
         info = self.conn.execute("PRAGMA table_info('qa_records')").fetchall()
         # table_info: [cid, name, type, notnull, dflt_value, pk]
-        types: Dict[str, str] = {str(r[1]).lower(): str(r[2]).upper() for r in info}
+        types: dict[str, str] = {str(r[1]).lower(): str(r[2]).upper() for r in info}
 
         expected = f"FLOAT[{self.embedding_size}]"
         q_type = types.get("question_embedding", "")
@@ -157,7 +159,7 @@ class QADatabaseStore:
         return re.sub(r"\s+", " ", cleaned.lower()).strip()
 
     @staticmethod
-    def _normalize_category(value: Optional[str]) -> Optional[str]:
+    def _normalize_category(value: str | None) -> str | None:
         """Trim category input; map empty/whitespace-only to None.
 
         Args:
@@ -173,7 +175,7 @@ class QADatabaseStore:
 
     # -------------------------- Embedding validation -------------------------
 
-    def _validate_and_normalize_embedding(self, emb: Sequence[float]) -> List[float]:
+    def _validate_and_normalize_embedding(self, emb: Sequence[float]) -> list[float]:
         """Validate and L2-normalize an embedding.
 
         Args:
@@ -202,7 +204,7 @@ class QADatabaseStore:
 
     # ------------------------------- Queries ---------------------------------
 
-    def find_question(self, question: str) -> Optional[Dict[str, Any]]:
+    def find_question(self, question: str) -> dict[str, Any] | None:
         """Find an exact question by its canonical form.
 
         Args:
@@ -234,7 +236,7 @@ class QADatabaseStore:
         self,
         question: str,
         answer: str,
-        category: Optional[str],
+        category: str | None,
         question_embedding: Sequence[float],
         answer_embedding: Sequence[float],
     ) -> bool:
@@ -340,7 +342,7 @@ class QADatabaseStore:
                 logger.error("Update failed: %s", exc)
             return False
 
-    def update_category(self, question: str, category: Optional[str]) -> bool:
+    def update_category(self, question: str, category: str | None) -> bool:
         """Update category for an existing question.
 
         Args:
@@ -381,10 +383,10 @@ class QADatabaseStore:
     def search_similar_questions(
         self,
         question_embedding: Sequence[float],
-        category: Optional[str] = None,
+        category: str | None = None,
         top_k: int = DEFAULT_TOP_K,
         threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Search similar questions using SQL `array_cosine_similarity`.
 
         The input embedding is validated and normalized. The SQL casts the
@@ -452,7 +454,7 @@ class QADatabaseStore:
                 ).fetchall()
 
             # Optional light deduplication by answer text (keep highest sim).
-            best_by_answer: Dict[str, Tuple[int, str, str, Optional[str], float]] = {}
+            best_by_answer: dict[str, tuple[int, str, str, str | None, float]] = {}
             for rid, qtext, ans, catval, sim in rows:
                 prev = best_by_answer.get(ans)
                 if prev is None or sim > prev[4]:
@@ -477,7 +479,7 @@ class QADatabaseStore:
 
     # ------------------------------ Utilities --------------------------------
 
-    def get_all_qa_records(self) -> List[Dict[str, Any]]:
+    def get_all_qa_records(self) -> list[dict[str, Any]]:
         """Return all Q&A records (lightweight listing)."""
         rows = self.conn.execute(
             "SELECT id, question, answer, category, created_at, updated_at FROM qa_records ORDER BY id"
@@ -494,18 +496,18 @@ class QADatabaseStore:
             for r in rows
         ]
 
-    def get_categories(self) -> List[str]:
+    def get_categories(self) -> list[str]:
         """Return all distinct non-null categories sorted alphabetically."""
         rows = self.conn.execute(
             "SELECT DISTINCT category FROM qa_records WHERE category IS NOT NULL ORDER BY category"
         ).fetchall()
         return [r[0] for r in rows]
 
-    def get_distinct_categories_from_qa(self) -> List[str]:
+    def get_distinct_categories_from_qa(self) -> list[str]:
         """Alias for get_categories() (clarity)."""
         return self.get_categories()
 
-    def get_qa_without_category(self) -> List[Dict[str, Any]]:
+    def get_qa_without_category(self) -> list[dict[str, Any]]:
         """Return Q&A records with NULL or empty category."""
         rows = self.conn.execute(
             "SELECT id, question, answer, category, created_at, updated_at "

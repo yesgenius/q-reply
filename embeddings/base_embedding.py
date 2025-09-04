@@ -18,11 +18,13 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
+
 
 logger = logging.getLogger(__name__)
 
 from gigachat.client import GigaChatClient
+
 
 # Initialize GigaChat client
 llm = GigaChatClient()
@@ -31,7 +33,7 @@ llm = GigaChatClient()
 DEFAULT_MODEL = "EmbeddingsGigaR"  # Use instruction-aware model by default
 
 
-def get_instruction(task_type: Optional[str] = None, **kwargs: Any) -> str:
+def get_instruction(task_type: str | None = None, **kwargs: Any) -> str:
     """Generate instruction prefix for embedding tasks.
 
     This method should be overridden in specific embedding implementations
@@ -95,8 +97,8 @@ def get_instruction(task_type: Optional[str] = None, **kwargs: Any) -> str:
 
 
 def prepare_texts(
-    texts: Union[str, List[str]], instruction: str = "", **kwargs: Any
-) -> List[str]:
+    texts: str | list[str], instruction: str = "", **kwargs: Any
+) -> list[str]:
     """Prepare texts for embedding with optional instruction prefix.
 
     Args:
@@ -136,13 +138,13 @@ def prepare_texts(
 
 
 def create_embeddings(
-    texts: Union[str, List[str]],
+    texts: str | list[str],
     model: str = DEFAULT_MODEL,
-    task_type: Optional[str] = None,
+    task_type: str | None = None,
     apply_instruction: bool = True,
-    custom_instruction: Optional[str] = None,
+    custom_instruction: str | None = None,
     **kwargs: Any,
-) -> Tuple[List[List[float]], List[str]]:
+) -> tuple[list[list[float]], list[str]]:
     """Create embeddings for input texts with optional instructions.
 
     This is the main function for creating embeddings. It handles:
@@ -211,7 +213,7 @@ def create_embeddings(
     prepared_texts = prepare_texts(texts, instruction)
 
     # Extract API tracing parameters from kwargs
-    api_params: Dict[str, Any] = {}
+    api_params: dict[str, Any] = {}
     tracing_params = ["x_request_id", "x_session_id", "x_client_id"]
     for key in tracing_params:
         if key in kwargs:
@@ -262,7 +264,7 @@ def create_embeddings(
             )
 
         # Extract embedding vectors
-        embeddings: List[List[float]] = []
+        embeddings: list[list[float]] = []
         for i, emb_data in enumerate(embeddings_data):
             if not isinstance(emb_data, dict):
                 raise RuntimeError(
@@ -294,12 +296,12 @@ def create_embeddings(
 
 
 def create_batch_embeddings(
-    texts: List[str],
+    texts: list[str],
     batch_size: int = 100,
     model: str = DEFAULT_MODEL,
-    task_type: Optional[str] = None,
+    task_type: str | None = None,
     **kwargs: Any,
-) -> Tuple[List[List[float]], List[str]]:
+) -> tuple[list[list[float]], list[str]]:
     """Create embeddings for large text collections in batches.
 
     Handles large datasets by processing in batches to avoid API limits
@@ -333,8 +335,8 @@ def create_batch_embeddings(
 
     logger.info(f"Processing {len(texts)} texts in batches of {batch_size}")
 
-    all_embeddings: List[List[float]] = []
-    all_input_texts: List[str] = []
+    all_embeddings: list[list[float]] = []
+    all_input_texts: list[str] = []
     total_batches = (len(texts) + batch_size - 1) // batch_size
 
     for i in range(0, len(texts), batch_size):
@@ -369,7 +371,7 @@ if __name__ == "__main__":
     )
 
     import sys
-    from typing import Callable
+    from collections.abc import Callable
 
     print("=== Base Embedding Module Tests ===\n")
 

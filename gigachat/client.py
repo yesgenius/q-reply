@@ -43,14 +43,16 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, Generator, List, Optional, Union
+from collections.abc import Generator
+from datetime import UTC, datetime
+from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .config import GigaChatConfig
+
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ class GigaChatClient:
         token_expires_at: Token expiration timestamp (only used in Basic mode).
     """
 
-    def __init__(self, config: Optional[GigaChatConfig] = None):
+    def __init__(self, config: GigaChatConfig | None = None):
         """Initialize GigaChat client.
 
         Args:
@@ -80,8 +82,8 @@ class GigaChatClient:
         logger.debug(f"Initializing GigaChatClient with config: {config}")
         self.config = config or GigaChatConfig()
         self.session = self._create_session()
-        self.access_token: Optional[str] = None
-        self.token_expires_at: Optional[int] = None
+        self.access_token: str | None = None
+        self.token_expires_at: int | None = None
 
         # Log authentication mode
         auth_mode = "mTLS" if self.config.is_cert_auth() else "Basic"
@@ -163,7 +165,7 @@ class GigaChatClient:
 
         return is_valid
 
-    def _safe_parse_expiration(self, token_data: Dict[str, Any]) -> Optional[int]:
+    def _safe_parse_expiration(self, token_data: dict[str, Any]) -> int | None:
         """Safely parse token expiration from response.
 
         Args:
@@ -200,7 +202,7 @@ class GigaChatClient:
         )
         return int(time.time()) + 1800
 
-    def _get_auth_headers(self) -> Dict[str, str]:
+    def _get_auth_headers(self) -> dict[str, str]:
         """Get authentication headers based on auth mode.
 
         Returns:
@@ -212,12 +214,11 @@ class GigaChatClient:
         if self.config.is_cert_auth():
             # mTLS mode: no Authorization header needed
             return {}
-        else:
-            # Basic mode: use Bearer token
-            token = self._get_access_token()
-            return {"Authorization": f"Bearer {token}"}
+        # Basic mode: use Bearer token
+        token = self._get_access_token()
+        return {"Authorization": f"Bearer {token}"}
 
-    def _prepare_optional_headers(self, **kwargs: Any) -> Dict[str, str]:
+    def _prepare_optional_headers(self, **kwargs: Any) -> dict[str, str]:
         """Prepare optional headers from kwargs.
 
         Args:
@@ -300,7 +301,7 @@ class GigaChatClient:
 
             if self.token_expires_at:
                 expiry_time = datetime.fromtimestamp(
-                    self.token_expires_at, tz=timezone.utc
+                    self.token_expires_at, tz=UTC
                 )
                 logger.info(f"Token obtained, expires at {expiry_time}")
                 logger.debug(f"Token expiration timestamp: {self.token_expires_at}")
@@ -343,7 +344,7 @@ class GigaChatClient:
 
         return self._get_access_token()
 
-    def get_models(self, **kwargs: Any) -> List[Dict[str, Any]]:
+    def get_models(self, **kwargs: Any) -> list[dict[str, Any]]:
         """Get list of available models.
 
         Args:
@@ -386,15 +387,15 @@ class GigaChatClient:
 
     def chat_completion(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         model: str = "GigaChat",
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
         stream: bool = False,
-        max_tokens: Optional[int] = None,
-        repetition_penalty: Optional[float] = None,
+        max_tokens: int | None = None,
+        repetition_penalty: float | None = None,
         **kwargs: Any,
-    ) -> Union[Dict[str, Any], Generator[Dict[str, Any], None, None]]:
+    ) -> dict[str, Any] | Generator[dict[str, Any], None, None]:
         """Get chat completion from the model.
 
         Args:
@@ -447,7 +448,7 @@ class GigaChatClient:
             **self._prepare_optional_headers(**kwargs),
         }
 
-        data: Dict[str, Any] = {"model": model, "messages": messages, "stream": stream}
+        data: dict[str, Any] = {"model": model, "messages": messages, "stream": stream}
 
         # Add optional parameters
         if temperature is not None:
@@ -496,7 +497,7 @@ class GigaChatClient:
                 response.raise_for_status()
                 logger.debug("Streaming response initiated")
 
-                def stream_generator() -> Generator[Dict[str, Any], None, None]:
+                def stream_generator() -> Generator[dict[str, Any], None, None]:
                     """Generate streaming response chunks.
 
                     Yields:
@@ -526,28 +527,27 @@ class GigaChatClient:
                         logger.debug("Stream connection closed")
 
                 return stream_generator()
-            else:
-                # For non-streaming responses
-                response = self.session.post(
-                    self.config.completion_url,
-                    headers=headers,
-                    json=data,
-                    timeout=self.config.request_timeout,
-                )
-                response.raise_for_status()
-                result = response.json()
+            # For non-streaming responses
+            response = self.session.post(
+                self.config.completion_url,
+                headers=headers,
+                json=data,
+                timeout=self.config.request_timeout,
+            )
+            response.raise_for_status()
+            result = response.json()
 
-                if logger.isEnabledFor(logging.DEBUG):
-                    # Log response metrics
-                    if "usage" in result:
-                        usage = result["usage"]
-                        logger.debug(
-                            f"Token usage - prompt: {usage.get('prompt_tokens')}, "
-                            f"completion: {usage.get('completion_tokens')}, "
-                            f"total: {usage.get('total_tokens')}"
-                        )
+            if logger.isEnabledFor(logging.DEBUG):
+                # Log response metrics
+                if "usage" in result:
+                    usage = result["usage"]
+                    logger.debug(
+                        f"Token usage - prompt: {usage.get('prompt_tokens')}, "
+                        f"completion: {usage.get('completion_tokens')}, "
+                        f"total: {usage.get('total_tokens')}"
+                    )
 
-                return result
+            return result
 
         except requests.RequestException as e:
             logger.error(f"Failed to get chat completion: {e}")
@@ -555,10 +555,10 @@ class GigaChatClient:
 
     def create_embeddings(
         self,
-        input_texts: Union[str, List[str]],
+        input_texts: str | list[str],
         model: str = "Embeddings",
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create embeddings for input texts.
 
         Args:

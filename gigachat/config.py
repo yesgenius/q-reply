@@ -10,7 +10,6 @@ Usage:
 
 import os
 from pathlib import Path
-from typing import Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -40,7 +39,7 @@ class GigaChatConfig:
         max_retries: Maximum retry attempts (default: 3).
     """
 
-    def __init__(self, env_file: Optional[str] = ".env"):
+    def __init__(self, env_file: str | None = ".env"):
         """Initialize configuration from environment variables.
 
         Args:
@@ -88,7 +87,7 @@ class GigaChatConfig:
         # Validate scope
         self._validate_scope()
 
-    def _get_path(self, env_var: str) -> Optional[Path]:
+    def _get_path(self, env_var: str) -> Path | None:
         """Get path from environment variable.
 
         Args:
@@ -192,7 +191,7 @@ class GigaChatConfig:
         """
         return bool(self.tls_cert and self.tls_key)
 
-    def get_cert_paths(self) -> Optional[Tuple[str, str]]:
+    def get_cert_paths(self) -> tuple[str, str] | None:
         """Get certificate and key paths for requests library.
 
         Returns:
@@ -202,7 +201,7 @@ class GigaChatConfig:
             return (str(self.tls_cert), str(self.tls_key))
         return None
 
-    def get_verify_path(self) -> Optional[str]:
+    def get_verify_path(self) -> str | None:
         """Get CA certificate path for SSL verification.
 
         Returns:
@@ -213,7 +212,7 @@ class GigaChatConfig:
         return None
 
 
-def load_config(env_file: Optional[str] = ".env") -> GigaChatConfig:
+def load_config(env_file: str | None = ".env") -> GigaChatConfig:
     """Load configuration from environment variables.
 
     Args:

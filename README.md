@@ -55,7 +55,7 @@ q-reply/
 
 ### [Prompts](prompts/README.md)
 Система управления промптами для языковой модели:
-- Категоризация вопросов (`define_category_prompt`)
+- Категоризация вопросов (`get_category_prompt`)
 - Генерация ответов с контекстом (`get_answer_prompt`)
 - Кэширование системных промптов
 - [Подробная документация →](prompts/README.md)
@@ -129,7 +129,7 @@ python category_filler.py
 - `out/QA_YYYY-MM-DD_HHMMSS.xlsx` — файл с заполненными категориями
 - Лист `LOG_CATEGORY` с детальной информацией о процессе категоризации
 
-Используемые компоненты: [prompts](prompts/README.md#define_category_promptpy), [gigachat](gigachat/README.md)
+Используемые компоненты: [prompts](prompts/README.md#get_category_promptpy), [gigachat](gigachat/README.md)
 
 ### 2. Обновление векторной базы данных (update_db.py)
 
@@ -228,7 +228,7 @@ python -m embeddings.base_embedding
 python -m db.duckdb_qa_store_test
 
 # Тестирование промптов
-python -m prompts.define_category_prompt
+python -m prompts.get_category_prompt
 python -m prompts.get_answer_prompt
 ```
 
@@ -272,4 +272,3 @@ python -m prompts.get_answer_prompt
 2. Убедитесь, что входные Excel файлы не открыты в других программах
 3. Проверьте наличие всех необходимых листов и колонок в файлах
 4. Изучите логи в консоли и LOG листах результирующих файлов
-

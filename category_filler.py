@@ -1,13 +1,13 @@
 #!/usr/bin/env python
-"""Question category filler script with answer context support.
+"""Question category filler script with answer context and response logging support.
 
 This script automatically fills question categories using GigaChat LLM
 based on a predefined category dictionary from an Excel file.
-Now supports using answers to enhance categorization accuracy.
+Supports using answers to enhance categorization accuracy and logs raw responses.
 
 The script processes questions from an Excel file, categorizes them using
-the define_category_prompt module with optional answer context, and saves
-results with detailed logging.
+the get_category_prompt module with optional answer context, and saves
+results with detailed logging including raw LLM responses.
 
 Usage:
     python category_filler.py
@@ -16,31 +16,22 @@ Configuration:
     Adjust settings at the beginning of the script for IDE execution.
 """
 
-
 import json
 import logging
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-# Import the categorization module
-try:
-    from prompts import define_category_prompt
-except ImportError:
-    print("Error: Could not import define_category_prompt module")
-    print("Ensure the module is in the correct path: prompts/define_category_prompt.py")
-    sys.exit(1)
 
 # ============================================================================
 # CONFIGURATION SECTION - Adjust these settings for IDE execution
 # ============================================================================
-
 
 # File paths
 INPUT_FILE = Path("in/QA.xlsx")
@@ -50,7 +41,7 @@ OUTPUT_DIR = Path("out")
 SHEET_QA = "QA"
 SHEET_CATEGORY = "CATEGORY"
 SHEET_LOG_PREFIX = "LOG_CATEGORY"
-SHEET_LOG_PARAMS = "LOG_CATEGORY_PARAMS"  # New sheet for model parameters
+SHEET_LOG_PARAMS = "LOG_CATEGORY_PARAMS"
 
 # Column indices (1-based for openpyxl)
 COL_CATEGORY_NAME = 1  # Column A in CATEGORY sheet
@@ -70,6 +61,7 @@ RETRY_DELAY = 2  # Delay between retries in seconds (if needed)
 LOG_CATEGORY = True  # Set to False to disable category logging sheet
 LOG_TO_FILE = True  # Enable logging to text file
 LOG_LEVEL = logging.INFO
+# LOG_LEVEL = logging.DEBUG
 
 # Processing configuration
 START_ROW = 2  # Skip header row
@@ -83,72 +75,124 @@ RESUME_FILE = Path(".category_filler_resume.json")  # Hidden file for resume sta
 # ============================================================================
 
 
-class DualLogger:
-    """Logger that writes to both console and file."""
+def setup_logging(log_file: Path | None = None) -> None:
+    """Configure logging for all modules used by this script.
 
-    def __init__(self, log_file: Optional[Path] = None):
-        """Initialize dual logger.
+    Sets up unified logging configuration for the main script and all imported
+    modules to ensure consistent formatting and output handling.
 
-        Args:
-            log_file: Path to log file. If None, only console logging.
-        """
-        self.log_file = log_file
-        self.file_handler = None
+    Args:
+        log_file: Optional path to log file. If provided, logs will be written
+            to both console and file.
+    """
+    # Create formatter with consistent format
+    formatter = logging.Formatter(
+        "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
+    )
 
-        # Configure main logger
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(LOG_LEVEL)
+    # Get root logger to configure all loggers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(LOG_LEVEL)
 
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(LOG_LEVEL)
-        formatter = logging.Formatter(
-            "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
-        )
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+    # Remove any existing handlers to avoid duplicates
+    root_logger.handlers.clear()
 
-        # File handler if requested
-        if log_file and LOG_TO_FILE:
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(LOG_LEVEL)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # File handler if requested
+    if log_file and LOG_TO_FILE:
+        try:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler.setLevel(LOG_LEVEL)
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+
+            # Log to confirm file logging is active
+            logger = logging.getLogger(__name__)
+            logger.info(f"Logging to file: {log_file}")
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not create log file: {e}")
+
+
+# Import the categorization module AFTER setting up logging
+# This ensures the module inherits our logging configuration
+try:
+    from prompts import get_category_prompt
+except ImportError:
+    print("Error: Could not import get_category_prompt module")
+    print("Ensure the module is in the correct path: prompts/get_category_prompt.py")
+    sys.exit(1)
+
+
+def format_json_for_excel(data: Any) -> str:
+    """Format JSON data for Excel cell display.
+
+    Formats JSON data (messages or raw responses) for readable display
+    in Excel cells while preserving the complete data structure.
+
+    Args:
+        data: JSON-serializable data (dict, list, or already stringified JSON).
+
+    Returns:
+        Formatted JSON string suitable for Excel cell display.
+    """
+    try:
+        # Handle None or empty data
+        if data is None:
+            return ""
+
+        # If already a string, try to parse and re-format
+        if isinstance(data, str):
+            # Check if it's already JSON-formatted
             try:
-                log_file.parent.mkdir(parents=True, exist_ok=True)
-                self.file_handler = logging.FileHandler(log_file, encoding="utf-8")
-                self.file_handler.setLevel(LOG_LEVEL)
-                self.file_handler.setFormatter(formatter)
-                self.logger.addHandler(self.file_handler)
-                self.logger.info(f"Logging to file: {log_file}")
-            except Exception as e:
-                self.logger.warning(f"Could not create log file: {e}")
+                parsed_data = json.loads(data)
+                data = parsed_data
+            except (json.JSONDecodeError, TypeError):
+                # Not JSON or parsing failed, return cleaned string
+                # Remove excessive whitespace while preserving structure
+                lines = data.split("\n")
+                cleaned_lines = [line.rstrip() for line in lines]
+                return "\n".join(cleaned_lines)
 
-    def close(self):
-        """Close file handler if exists."""
-        if self.file_handler:
-            self.file_handler.close()
-            self.logger.removeHandler(self.file_handler)
+        # Format with indentation and ensure_ascii=False for readability
+        formatted = json.dumps(data, ensure_ascii=False, indent=2)
+
+        # Replace escaped newlines with actual newlines for Excel
+        formatted = formatted.replace("\\n", "\n")
+
+        # Replace escaped quotes for better readability
+        formatted = formatted.replace('\\"', '"')
+
+        return formatted
+
+    except (TypeError, ValueError) as e:
+        # If formatting fails, return string representation
+        logger = logging.getLogger(__name__)
+        logger.debug(f"JSON formatting failed: {e}")
+        return str(data)
 
 
-# Global logger instance (will be initialized in CategoryFiller)
+# Get logger for this module
 logger = logging.getLogger(__name__)
 
 
 class CategoryFiller:
-    """Main class for filling question categories using LLM with answer context support."""
+    """Main class for filling question categories using LLM with answer context and response logging."""
 
     def __init__(self):
         """Initialize the category filler."""
-        self.workbook: Optional[Workbook] = None
-        self.output_file: Optional[Path] = None
-        self.categories: Dict[str, str] = {}
+        self.workbook: Workbook | None = None
+        self.output_file: Path | None = None
+        self.categories: dict[str, str] = {}
         self.processed_count: int = 0
-        self.resume_state: Dict = {}
+        self.resume_state: dict = {}
         self.timestamp: str = ""
-        self.dual_logger: Optional[DualLogger] = None
-
-    def _update_logger(self) -> None:
-        """Update global logger reference when dual logger is available."""
-        global logger
-        if self.dual_logger:
-            logger = self.dual_logger.logger
 
     def validate_input_file(self) -> bool:
         """Validate that input file exists and has required sheets.
@@ -164,16 +208,14 @@ class CategoryFiller:
 
         # Check if file is accessible (not locked)
         try:
-            # Try to open file in exclusive mode to check if it's locked
             with open(INPUT_FILE, "rb") as f:
-                # Just open and close - if this works, file is not locked
-                pass
+                pass  # Just open and close - if this works, file is not locked
         except PermissionError:
             logger.error(f"Cannot access file: {INPUT_FILE}")
             logger.error("The file might be open in Excel or another program.")
             logger.error("Please close the file and run the script again.")
             return False
-        except IOError as e:
+        except OSError as e:
             logger.error(f"Cannot read file {INPUT_FILE}: {e}")
             return False
 
@@ -204,7 +246,7 @@ class CategoryFiller:
             logger.error(f"Error reading input file: {e}")
             return False
 
-    def load_categories(self, sheet: Worksheet) -> Dict[str, str]:
+    def load_categories(self, sheet: Worksheet) -> dict[str, str]:
         """Load category dictionary from CATEGORY sheet.
 
         Args:
@@ -246,7 +288,7 @@ class CategoryFiller:
         logger.info(f"Loaded {len(categories)} categories from CATEGORY sheet")
         return categories
 
-    def validate_qa_data(self, sheet: Worksheet) -> List[int]:
+    def validate_qa_data(self, sheet: Worksheet) -> list[int]:
         """Validate QA sheet data completeness and identify rows needing processing.
 
         Args:
@@ -335,9 +377,9 @@ class CategoryFiller:
         params_sheet.cell(row=1, column=3, value="Description")
 
         # Get model parameters
-        model_params = getattr(define_category_prompt, "params", {})
+        model_params = getattr(get_category_prompt, "params", {})
 
-        # Configuration parameters with constant names
+        # Configuration parameters
         row = 2
         params_sheet.cell(row=row, column=1, value="--- Configuration Settings ---")
         params_sheet.cell(row=row, column=2, value="")
@@ -389,81 +431,32 @@ class CategoryFiller:
             params_sheet.cell(row=row, column=3, value=param_desc)
             row += 1
 
-        # Sheet names section
-        row += 1
-        params_sheet.cell(row=row, column=1, value="--- Sheet Names ---")
-        params_sheet.cell(row=row, column=2, value="")
-        params_sheet.cell(row=row, column=3, value="Excel worksheet names")
-        row += 1
-
-        sheet_params = [
-            ("SHEET_QA", SHEET_QA, "Questions and answers sheet"),
-            ("SHEET_CATEGORY", SHEET_CATEGORY, "Categories dictionary sheet"),
-            ("SHEET_LOG_PREFIX", SHEET_LOG_PREFIX, "Category logging sheet name"),
-            ("SHEET_LOG_PARAMS", SHEET_LOG_PARAMS, "Parameters logging sheet name"),
-        ]
-
-        for param_name, param_value, param_desc in sheet_params:
-            params_sheet.cell(row=row, column=1, value=param_name)
-            params_sheet.cell(row=row, column=2, value=param_value)
-            params_sheet.cell(row=row, column=3, value=param_desc)
-            row += 1
-
-        # Column indices section
-        row += 1
-        params_sheet.cell(row=row, column=1, value="--- Column Indices ---")
-        params_sheet.cell(row=row, column=2, value="")
-        params_sheet.cell(row=row, column=3, value="Excel column positions (1-based)")
-        row += 1
-
-        column_params = [
-            (
-                "COL_CATEGORY_NAME",
-                COL_CATEGORY_NAME,
-                "Category name column in CATEGORY sheet",
-            ),
-            (
-                "COL_CATEGORY_DESC",
-                COL_CATEGORY_DESC,
-                "Category description column in CATEGORY sheet",
-            ),
-            ("COL_QA_CATEGORY", COL_QA_CATEGORY, "Category column in QA sheet"),
-            ("COL_QA_QUESTION", COL_QA_QUESTION, "Question column in QA sheet"),
-            ("COL_QA_ANSWER", COL_QA_ANSWER, "Answer column in QA sheet"),
-        ]
-
-        for param_name, param_value, param_desc in column_params:
-            params_sheet.cell(row=row, column=1, value=param_name)
-            params_sheet.cell(row=row, column=2, value=str(param_value))
-            params_sheet.cell(row=row, column=3, value=param_desc)
-            row += 1
-
         # Model parameters section
-        row += 1
-        params_sheet.cell(row=row, column=1, value="--- Model Parameters ---")
-        params_sheet.cell(row=row, column=2, value="")
-        params_sheet.cell(row=row, column=3, value="LLM configuration settings")
-        row += 1
-
-        # Model parameter descriptions
-        param_descriptions = {
-            "model": "LLM model name",
-            "temperature": "Randomness of responses (0-1)",
-            "top_p": "Nucleus sampling threshold",
-            "stream": "Whether to stream responses",
-            "max_tokens": "Maximum tokens in response",
-            "repetition_penalty": "Penalty for repeated tokens",
-        }
-
-        for param_name, param_value in model_params.items():
-            params_sheet.cell(row=row, column=1, value=param_name)
-            params_sheet.cell(row=row, column=2, value=str(param_value))
-            params_sheet.cell(
-                row=row, column=3, value=param_descriptions.get(param_name, "")
-            )
+        if model_params:
+            row += 1
+            params_sheet.cell(row=row, column=1, value="--- Model Parameters ---")
+            params_sheet.cell(row=row, column=2, value="")
+            params_sheet.cell(row=row, column=3, value="LLM configuration settings")
             row += 1
 
-        # Auto-adjust column widths for readability
+            param_descriptions = {
+                "model": "LLM model name",
+                "temperature": "Randomness of responses (0-1)",
+                "top_p": "Nucleus sampling threshold",
+                "stream": "Whether to stream responses",
+                "max_tokens": "Maximum tokens in response",
+                "repetition_penalty": "Penalty for repeated tokens",
+            }
+
+            for param_name, param_value in model_params.items():
+                params_sheet.cell(row=row, column=1, value=param_name)
+                params_sheet.cell(row=row, column=2, value=str(param_value))
+                params_sheet.cell(
+                    row=row, column=3, value=param_descriptions.get(param_name, "")
+                )
+                row += 1
+
+        # Auto-adjust column widths
         for column in params_sheet.columns:
             max_length = 0
             column_letter = column[0].column_letter
@@ -478,7 +471,7 @@ class CategoryFiller:
 
         logger.info(f"Created '{SHEET_LOG_PARAMS}' sheet with model parameters")
 
-    def create_output_file(self) -> Tuple[Workbook, Path]:
+    def create_output_file(self) -> tuple[Workbook, Path]:
         """Create output file with timestamp.
 
         Returns:
@@ -491,27 +484,27 @@ class CategoryFiller:
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         output_file = OUTPUT_DIR / f"QA_{self.timestamp}.xlsx"
 
-        # Initialize file logger
+        # Setup logging with file output
         if LOG_TO_FILE:
             log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
-            self.dual_logger = DualLogger(log_file)
-            # Reinitialize global logger reference
-            self._update_logger()
+            setup_logging(log_file)
+        else:
+            setup_logging()
 
         logger.info(f"Copying {INPUT_FILE} to {output_file}")
 
-        # SIMPLE FILE COPY - preserves EVERYTHING exactly as is
+        # Copy file preserving everything
         shutil.copy2(INPUT_FILE, output_file)
-        logger.info(f"File copied successfully")
+        logger.info("File copied successfully")
 
-        # Now open the copied file for modifications
+        # Open the copied file for modifications
         wb = openpyxl.load_workbook(output_file)
 
         # Handle LOG_CATEGORY sheet based on configuration
         log_sheet_name = SHEET_LOG_PREFIX
 
         if LOG_CATEGORY:
-            # Remove existing LOG_CATEGORY sheet if it exists (for fresh start)
+            # Remove existing LOG_CATEGORY sheet if it exists
             if log_sheet_name in wb.sheetnames:
                 logger.info(
                     f"Removing existing '{log_sheet_name}' sheet for fresh start"
@@ -523,12 +516,13 @@ class CategoryFiller:
 
             # Add headers to LOG_CATEGORY sheet
             headers = [
-                "Категории",
-                "Вопросы",
-                "category",
-                "confidence",
-                "reasoning",
-                "messages",
+                "Original Category",
+                "Question",
+                "Assigned Category",
+                "Confidence",
+                "Reasoning",
+                "Messages",
+                "Response",
             ]
             for col_idx, header in enumerate(headers, 1):
                 log_sheet.cell(row=1, column=col_idx, value=header)
@@ -538,7 +532,7 @@ class CategoryFiller:
             # Create LOG_CATEGORY_PARAMS sheet
             self.create_log_params_sheet(wb)
         else:
-            # If LOG_CATEGORY is False and sheet exists, remove it
+            # Remove sheets if LOG_CATEGORY is False
             if log_sheet_name in wb.sheetnames:
                 logger.info(f"Removing '{log_sheet_name}' sheet (LOG_CATEGORY=False)")
                 wb.remove(wb[log_sheet_name])
@@ -546,7 +540,7 @@ class CategoryFiller:
                 logger.info(f"Removing '{SHEET_LOG_PARAMS}' sheet (LOG_CATEGORY=False)")
                 wb.remove(wb[SHEET_LOG_PARAMS])
 
-        # Save modifications (only LOG_CATEGORY changes, everything else intact)
+        # Save modifications
         wb.save(output_file)
         logger.info(f"Created output file: {output_file}")
 
@@ -572,7 +566,7 @@ class CategoryFiller:
         except Exception as e:
             logger.warning(f"Could not save resume state: {e}")
 
-    def load_resume_state(self) -> Optional[Dict]:
+    def load_resume_state(self) -> dict | None:
         """Load resume state if exists.
 
         Returns:
@@ -582,8 +576,8 @@ class CategoryFiller:
             return None
 
         try:
-            with open(RESUME_FILE, "r", encoding="utf-8") as f:
-                state = json.load(f)
+            with open(RESUME_FILE, encoding="utf-8") as f:
+                state: dict = json.load(f)
 
             # Validate output file still exists
             output_path = Path(state["output_file"])
@@ -591,9 +585,8 @@ class CategoryFiller:
                 logger.info(f"Found resume state from {state['timestamp']}")
                 logger.info(f"Will continue from row {state['last_row'] + 1}")
                 return state
-            else:
-                logger.warning("Resume output file not found, starting fresh")
-                return None
+            logger.warning("Resume output file not found, starting fresh")
+            return None
 
         except Exception as e:
             logger.warning(f"Could not load resume state: {e}")
@@ -608,24 +601,9 @@ class CategoryFiller:
             except Exception as e:
                 logger.warning(f"Could not clear resume state: {e}")
 
-    def format_json_for_excel(self, json_string: str) -> str:
-        """Format JSON string for better readability in Excel cells.
-
-        Replaces escaped newlines with actual line breaks for Excel display.
-
-        Args:
-            json_string: JSON string potentially containing escaped newlines.
-
-        Returns:
-            Formatted string with actual line breaks for Excel.
-        """
-        # Replace escaped newlines with actual line breaks
-        # This makes multi-line content readable in Excel cells
-        return json_string.replace("\\n", "\n")
-
     def categorize_question_with_retry(
-        self, question: str, answer: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, question: str, answer: str | None = None
+    ) -> dict[str, Any]:
         """Categorize a question with retry logic on errors.
 
         Args:
@@ -633,27 +611,24 @@ class CategoryFiller:
             answer: Optional answer text to provide additional context.
 
         Returns:
-            Dictionary with category, confidence, reasoning, and messages.
+            Dictionary with category, confidence, reasoning, messages, and response.
         """
+        import time
+
         last_error = None
 
         for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
             try:
-                # Run categorization
-                result_json, messages_list = define_category_prompt.run(
+                # Run categorization - returns three values
+                result_json, messages_list, raw_response = get_category_prompt.run(
                     question,
                     answer=answer if USE_ANSWER_FOR_CATEGORIZATION and answer else None,
                 )
-                result = json.loads(result_json)
+                result: dict[str, Any] = json.loads(result_json)
 
-                # Convert messages list to JSON string for storage
-                messages_json = json.dumps(messages_list, ensure_ascii=False, indent=2)
-
-                # Format JSON for Excel readability
-                messages_formatted = messages_json.replace("\\n", "\n")
-
-                # Add formatted messages to result dictionary
-                result["messages"] = messages_formatted
+                # Format messages and response for Excel readability
+                result["messages"] = format_json_for_excel(messages_list)
+                result["response"] = format_json_for_excel(raw_response)
 
                 if attempt > 1:
                     logger.info(f"Categorization succeeded on attempt {attempt}")
@@ -667,9 +642,7 @@ class CategoryFiller:
                 )
 
                 if attempt < MAX_RETRY_ATTEMPTS:
-                    # Optional: add delay between retries
-                    import time
-
+                    # Add delay between retries if configured
                     if RETRY_DELAY > 0:
                         time.sleep(RETRY_DELAY)
                     continue
@@ -679,12 +652,13 @@ class CategoryFiller:
         return {
             "category": "Error",
             "confidence": 0.0,
-            "reasoning": f"All retry attempts failed. Last error: {str(last_error)}",
+            "reasoning": f"All retry attempts failed. Last error: {last_error!s}",
             "messages": "[]",
+            "response": "{}",
         }
 
     def process_row(
-        self, sheet_qa: Worksheet, sheet_log: Optional[Worksheet], row_idx: int
+        self, sheet_qa: Worksheet, sheet_log: Worksheet | None, row_idx: int
     ) -> bool:
         """Process a single row from QA sheet.
 
@@ -736,6 +710,7 @@ class CategoryFiller:
                 sheet_log.cell(row=row_idx, column=4, value=result["confidence"])
                 sheet_log.cell(row=row_idx, column=5, value=result.get("reasoning", ""))
                 sheet_log.cell(row=row_idx, column=6, value=result.get("messages", ""))
+                sheet_log.cell(row=row_idx, column=7, value=result.get("response", ""))
 
             # Log result
             logger.info(
@@ -757,6 +732,9 @@ class CategoryFiller:
             True if execution completed successfully, False otherwise.
         """
         try:
+            # Setup initial logging to console only
+            setup_logging()
+
             logger.info("=" * 70)
             logger.info("Starting Category Filler Script")
             logger.info(
@@ -778,11 +756,10 @@ class CategoryFiller:
                 if filename.startswith("QA_"):
                     self.timestamp = filename[3:]  # Remove "QA_" prefix
 
-                # Initialize file logger for resumed session
+                # Setup logging with file for resumed session
                 if LOG_TO_FILE:
                     log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
-                    self.dual_logger = DualLogger(log_file)
-                    self._update_logger()  # Use helper method
+                    setup_logging(log_file)
                     logger.info("=" * 70)
                     logger.info("RESUMED SESSION")
                     logger.info("=" * 70)
@@ -810,7 +787,7 @@ class CategoryFiller:
                     logger.error("=" * 70)
                     return False
 
-                # Step 2: Create output file
+                # Step 2: Create output file (this also sets up file logging)
                 logger.info("Step 2: Creating output file...")
                 self.workbook, self.output_file = self.create_output_file()
 
@@ -835,7 +812,7 @@ class CategoryFiller:
             logger.info("Step 4: Initializing GigaChat categorization system...")
 
             # Initialize with categories
-            define_category_prompt.update_system_prompt(categories=self.categories)
+            get_category_prompt.update_system_prompt(categories=self.categories)
             logger.info("Categorization system initialized successfully")
 
             if USE_ANSWER_FOR_CATEGORIZATION:
@@ -889,8 +866,7 @@ class CategoryFiller:
                 logger.info("Note: Using answers for enhanced categorization accuracy")
             logger.info("-" * 70)
 
-            # Type annotation for mypy
-            successfully_processed: List[int] = []  # Track successfully processed rows
+            successfully_processed: list[int] = []  # Track successfully processed rows
 
             for idx, row_idx in enumerate(rows_to_process, 1):
                 # Process row
@@ -899,7 +875,7 @@ class CategoryFiller:
                 if not success:
                     logger.error(f"Failed to process row {row_idx}")
 
-                    # Always save what we have processed so far (no need for flag)
+                    # Emergency save after error
                     if successfully_processed:
                         try:
                             self.workbook.save(self.output_file)
@@ -924,13 +900,13 @@ class CategoryFiller:
                         self.workbook.save(self.output_file)
                         self.save_resume_state(self.output_file, row_idx)
                         logger.info(
-                            f"Progress saved: {idx}/{len(rows_to_process)} rows processed (saved up to row {row_idx})"
+                            f"Progress saved: {idx}/{len(rows_to_process)} rows processed "
+                            f"(saved up to row {row_idx})"
                         )
                     except Exception as save_error:
                         logger.error(f"Could not save progress: {save_error}")
-                        # Continue processing even if save fails
 
-                # Also save on the last row
+                # Save on the last row
                 if idx == len(rows_to_process):
                     try:
                         self.workbook.save(self.output_file)
@@ -998,10 +974,6 @@ class CategoryFiller:
                     self.workbook.close()
                 except Exception:
                     pass  # Ignore close errors
-
-            # Close log file handler
-            if self.dual_logger:
-                self.dual_logger.close()
 
 
 def main():

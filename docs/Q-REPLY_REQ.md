@@ -42,10 +42,10 @@
            - колонки
              - **Категория** — категории из `QA_YYYY-MM-DD_HHMMSS.QA`
              - **Вопрос** — вопросы из `QA_YYYY-MM-DD_HHMMSS.QA`
-             - **category** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
-             - **confidence** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
-             - **reasoning** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
-             - **messages** — заполняется из `messages_list`, который возвращает `prompts.define_category_prompt.run()`
+             - **category** — заполняется из `result_json`, который возвращает `prompts.get_category_prompt.run()`
+             - **confidence** — заполняется из `result_json`, который возвращает `prompts.get_category_prompt.run()`
+             - **reasoning** — заполняется из `result_json`, который возвращает `prompts.get_category_prompt.run()`
+             - **messages** — заполняется из `messages_list`, который возвращает `prompts.get_category_prompt.run()`
        - Запоминает обработанную строку из `QA_YYYY-MM-DD_HHMMSS.QA`, чтобы при повторном старте после сбоя `gigachat.client` начать со следующей строки
 
 3. **Проверка результатов**
@@ -158,7 +158,7 @@
 
    - **Обработка каждого вопроса из `Q_YYYY-MM-DD_HHMMSS.xlsx`**
      - Получает эмбеддинги вопроса с помощью `embeddings.base_embedding.create_embeddings()`
-     - Определяет категорию из словаря категорий с помощью `prompts.define_category_prompt.run()`, если категории есть
+     - Определяет категорию из словаря категорий с помощью `prompts.get_category_prompt.run()`, если категории есть
      - Фильтрация вопросов БД по определенной категории, если категории есть
      - Поиск `N` наиболее близких вопросов по `cosine similarity` с помощью `db.duckdb_qa_store.search_similar_questions()`, если не найдено - перейти к следующей строке
      - Формирование контекста для `LLM`
@@ -175,10 +175,10 @@
        - положение каждой строки лога соответствует положению обрабатываемой строки на листе `Q_YYYY-MM-DD_HHMMSS.Q`
        - колонки
          - **Вопрос** — вопросы из `Q_YYYY-MM-DD_HHMMSS.Q`
-         - **category** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
-         - **confidence** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
-         - **reasoning** — заполняется из `result_json`, который возвращает `prompts.define_category_prompt.run()`
-         - **messages_category** — заполняется из `messages_list`, который возвращает `prompts.define_category_prompt.run()`
+         - **category** — заполняется из `result_json`, который возвращает `prompts.get_category_prompt.run()`
+         - **confidence** — заполняется из `result_json`, который возвращает `prompts.get_category_prompt.run()`
+         - **reasoning** — заполняется из `result_json`, который возвращает `prompts.get_category_prompt.run()`
+         - **messages_category** — заполняется из `messages_list`, который возвращает `prompts.get_category_prompt.run()`
          - **answer** — заполняется из `result_json`, который возвращает `prompts.get_answer_prompt.run()`
          - **confidence** — заполняется из `result_json`, который возвращает `prompts.get_answer_prompt.run()`
          - **sources_used** — заполняется из `result_json`, который возвращает `prompts.get_answer_prompt.run()`
@@ -232,7 +232,7 @@ q-reply/
 │   ├── QA_YYYY-MM-DD_HHMMSS.xlsx          # Результат `category_filler` (данные со 2-й строки, 1-я строка - заголовок)
 │   │   ├── Лист "QA"
 │   │   │   ├── A: Категория (обязательное поле)
-│   │   │   ├── B: Вопрос 
+│   │   │   ├── B: Вопрос
 │   │   │   └── C: Ответ
 │   │   ├── Лист "CATEGORY"
 │   │   │   ├── A: Категория
@@ -255,7 +255,7 @@ q-reply/
 │       │   │ ...
 │       │   ├── _: Найденный вопрос N
 │       │   └── _: Найденный ответ N
-│       └── Лист "LOG_ANSWER"              # Лог с информацией для контроля над процессом формирования ответа gigachat.client 
+│       └── Лист "LOG_ANSWER"              # Лог с информацией для контроля над процессом формирования ответа gigachat.client
 │
 ├── gigachat/                              # ОБЕРТКА REST API LLM
 │   ├── README.md
@@ -266,8 +266,8 @@ q-reply/
 ├── prompts/                               # ПАКЕТ КАСТОМНЫХ ПРОМТОВ С ФУНКЦИЕЙ ПОЛУЧЕНИЯ ОТВЕТА ОТ LLM
 │   ├── README.md
 │   ├── __init__.py
-│   ├── base_prompt.py                     # Пример модуля промта с вариантами и заглушками 
-│   ├── define_category_prompt.py          # модуль промта для выделения категорий, доработанная копия base_prompt.py
+│   ├── base_prompt.py                     # Пример модуля промта с вариантами и заглушками
+│   ├── get_category_prompt.py          # модуль промта для выделения категорий, доработанная копия base_prompt.py
 │   ├── get_answer_prompt.py               # модуль промта для формирования ответа на вопрос с использованием динамического контекста, доработанная копия base_prompt.py
 │   ├── some_prompt-1.py                   # модуль кастомного промта, доработанная копия base_prompt.py
 │   ├── some_prompt-2.py                   # модуль кастомного промта, доработанная копия base_prompt.py

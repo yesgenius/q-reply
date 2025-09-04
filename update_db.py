@@ -21,22 +21,11 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-# Import custom modules
-try:
-    from db import duckdb_qa_store
-    from embeddings import base_embedding
-except ImportError as e:
-    print(f"Error: Could not import required modules: {e}")
-    print("Ensure modules are in the correct paths:")
-    print("  - embeddings/base_embedding.py")
-    print("  - db/duckdb_qa_store.py")
-    sys.exit(1)
 
 # ============================================================================
 # CONFIGURATION SECTION - Adjust these settings for IDE execution
@@ -77,54 +66,67 @@ RESUME_FILE = Path(".update_db_resume.json")  # Hidden file for resume state
 # ============================================================================
 
 
-class DualLogger:
-    """Logger that writes to both console and file."""
+def setup_logging(log_file: Path | None = None) -> None:
+    """Configure unified logging for all modules.
 
-    def __init__(self, log_file: Optional[Path] = None):
-        """Initialize dual logger.
+    Sets up consistent logging configuration for the main script and all imported
+    modules to ensure uniform formatting and output handling.
 
-        Args:
-            log_file: Path to log file. If None, only console logging.
-        """
-        self.log_file = log_file
-        self.file_handler = None
+    Args:
+        log_file: Optional path to log file. If provided, logs will be written
+            to both console and file.
+    """
+    # Create formatter with consistent format
+    formatter = logging.Formatter(
+        "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
+    )
 
-        # Configure main logger
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(LOG_LEVEL)
+    # Get root logger to configure all loggers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(LOG_LEVEL)
 
-        # Clear existing handlers to avoid duplicates
-        self.logger.handlers.clear()
+    # Remove any existing handlers to avoid duplicates
+    root_logger.handlers.clear()
 
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(LOG_LEVEL)
-        formatter = logging.Formatter(
-            "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
-        )
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(LOG_LEVEL)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
 
-        # File handler if requested
-        if log_file and LOG_TO_FILE:
-            try:
-                log_file.parent.mkdir(parents=True, exist_ok=True)
-                self.file_handler = logging.FileHandler(log_file, encoding="utf-8")
-                self.file_handler.setLevel(LOG_LEVEL)
-                self.file_handler.setFormatter(formatter)
-                self.logger.addHandler(self.file_handler)
-                self.logger.info(f"Logging to file: {log_file}")
-            except Exception as e:
-                self.logger.warning(f"Could not create log file: {e}")
+    # File handler if requested
+    if log_file and LOG_TO_FILE:
+        try:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler.setLevel(LOG_LEVEL)
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
 
-    def close(self):
-        """Close file handler if exists."""
-        if self.file_handler:
-            self.file_handler.close()
-            self.logger.removeHandler(self.file_handler)
+            # Log to confirm file logging is active
+            logger = logging.getLogger(__name__)
+            logger.info(f"Logging to file: {log_file}")
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not create log file: {e}")
 
 
-# Global logger instance
+# Initialize logging early to capture import messages
+setup_logging()
+
+# Import custom modules after logging setup
+try:
+    from db import duckdb_qa_store
+    from embeddings import base_embedding
+except ImportError as e:
+    logger = logging.getLogger(__name__)
+    logger.error(f"Could not import required modules: {e}")
+    logger.error("Ensure modules are in the correct paths:")
+    logger.error("  - embeddings/base_embedding.py")
+    logger.error("  - db/duckdb_qa_store.py")
+    sys.exit(1)
+
+# Get logger for this module
 logger = logging.getLogger(__name__)
 
 
@@ -133,22 +135,15 @@ class DatabaseUpdater:
 
     def __init__(self):
         """Initialize the database updater."""
-        self.workbook: Optional[Workbook] = None
-        self.output_file: Optional[Path] = None
-        self.db_store: Optional[duckdb_qa_store.QADatabaseStore] = None
+        self.workbook: Workbook | None = None
+        self.output_file: Path | None = None
+        self.db_store: duckdb_qa_store.QADatabaseStore | None = None
         self.processed_count: int = 0
         self.updated_count: int = 0
         self.inserted_count: int = 0
         self.skipped_count: int = 0
-        self.resume_state: Dict = {}
+        self.resume_state: dict = {}
         self.timestamp: str = ""
-        self.dual_logger: Optional[DualLogger] = None
-
-    def _update_logger(self) -> None:
-        """Update global logger reference when dual logger is available."""
-        global logger
-        if self.dual_logger:
-            logger = self.dual_logger.logger
 
     def validate_input_file(self) -> bool:
         """Validate that input file exists and has required sheets.
@@ -157,7 +152,7 @@ class DatabaseUpdater:
             True if validation passes, False otherwise.
         """
         if not INPUT_FILE.exists():
-            print(f"Error: Input file not found: {INPUT_FILE}")
+            logger.error(f"Input file not found: {INPUT_FILE}")
             return False
 
         # Check if file is accessible
@@ -165,18 +160,18 @@ class DatabaseUpdater:
             with open(INPUT_FILE, "rb") as f:
                 pass
         except PermissionError:
-            print(f"Error: Cannot access file: {INPUT_FILE}")
-            print("The file might be open in Excel or another program.")
+            logger.error(f"Cannot access file: {INPUT_FILE}")
+            logger.error("The file might be open in Excel or another program.")
             return False
-        except IOError as e:
-            print(f"Error: Cannot read file {INPUT_FILE}: {e}")
+        except OSError as e:
+            logger.error(f"Cannot read file {INPUT_FILE}: {e}")
             return False
 
         try:
             wb = openpyxl.load_workbook(INPUT_FILE, read_only=True)
 
             if SHEET_QA not in wb.sheetnames:
-                print(f"Error: Required sheet '{SHEET_QA}' not found")
+                logger.error(f"Required sheet '{SHEET_QA}' not found")
                 wb.close()
                 return False
 
@@ -184,7 +179,7 @@ class DatabaseUpdater:
             return True
 
         except Exception as e:
-            print(f"Error: Error reading input file: {e}")
+            logger.error(f"Error reading input file: {e}")
             return False
 
     def validate_qa_data(self, sheet: Worksheet) -> bool:
@@ -336,7 +331,7 @@ class DatabaseUpdater:
 
         logger.info(f"Created '{SHEET_LOG_PARAMS}' sheet with script parameters")
 
-    def create_output_file(self) -> Tuple[Workbook, Path]:
+    def create_output_file(self) -> tuple[Workbook, Path]:
         """Create output file with timestamp.
 
         Returns:
@@ -349,17 +344,19 @@ class DatabaseUpdater:
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         output_file = OUTPUT_DIR / f"QA_{self.timestamp}.xlsx"
 
-        # Initialize file logger
+        # Setup file logging for this session
         if LOG_TO_FILE:
             log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
-            self.dual_logger = DualLogger(log_file)
-            self._update_logger()
+            setup_logging(log_file)
+        else:
+            # Ensure console logging is still active
+            setup_logging()
 
         logger.info(f"Copying {INPUT_FILE} to {output_file}")
 
         # Copy the file
         shutil.copy2(INPUT_FILE, output_file)
-        logger.info(f"File copied successfully")
+        logger.info("File copied successfully")
 
         # Open the copied file for modifications
         wb = openpyxl.load_workbook(output_file)
@@ -420,7 +417,7 @@ class DatabaseUpdater:
         except Exception as e:
             logger.warning(f"Could not save resume state: {e}")
 
-    def load_resume_state(self) -> Optional[Dict]:
+    def load_resume_state(self) -> dict | None:
         """Load resume state if exists.
 
         Returns:
@@ -430,21 +427,20 @@ class DatabaseUpdater:
             return None
 
         try:
-            with open(RESUME_FILE, "r", encoding="utf-8") as f:
-                state = json.load(f)
+            with open(RESUME_FILE, encoding="utf-8") as f:
+                state: dict = json.load(f)
 
             # Validate output file still exists
             output_path = Path(state["output_file"])
             if output_path.exists():
-                print(f"Found resume state from {state['timestamp']}")
-                print(f"Will continue from row {state['last_row'] + 1}")
+                logger.info(f"Found resume state from {state['timestamp']}")
+                logger.info(f"Will continue from row {state['last_row'] + 1}")
                 return state
-            else:
-                print("Resume output file not found, starting fresh")
-                return None
+            logger.info("Resume output file not found, starting fresh")
+            return None
 
         except Exception as e:
-            print(f"Warning: Could not load resume state: {e}")
+            logger.warning(f"Could not load resume state: {e}")
             return None
 
     def clear_resume_state(self) -> None:
@@ -457,7 +453,7 @@ class DatabaseUpdater:
                 logger.warning(f"Could not clear resume state: {e}")
 
     def process_row(
-        self, sheet_qa: Worksheet, sheet_log: Optional[Worksheet], row_idx: int
+        self, sheet_qa: Worksheet, sheet_log: Worksheet | None, row_idx: int
     ) -> bool:
         """Process a single row from QA sheet.
 
@@ -618,17 +614,16 @@ class DatabaseUpdater:
             True if execution completed successfully, False otherwise.
         """
         try:
-            # Use print for initial messages before logger is initialized
-            print("=" * 70)
-            print("Starting Database Update Script")
-            print("=" * 70)
+            logger.info("=" * 70)
+            logger.info("Starting Database Update Script")
+            logger.info("=" * 70)
 
             # Check for resume state
             resume_state = self.load_resume_state()
 
             if resume_state:
                 # Resume from previous run
-                print("Resuming from previous run...")
+                logger.info("Resuming from previous run...")
                 self.output_file = Path(resume_state["output_file"])
 
                 # Extract timestamp from filename for log file
@@ -636,11 +631,10 @@ class DatabaseUpdater:
                 if filename.startswith("QA_"):
                     self.timestamp = filename[3:]
 
-                # Initialize file logger for resumed session
+                # Setup file logging for resumed session
                 if LOG_TO_FILE:
                     log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
-                    self.dual_logger = DualLogger(log_file)
-                    self._update_logger()
+                    setup_logging(log_file)
                     logger.info("=" * 70)
                     logger.info("RESUMED SESSION")
                     logger.info("=" * 70)
@@ -649,23 +643,18 @@ class DatabaseUpdater:
                 start_from_row = resume_state["last_row"] + 1
             else:
                 # Fresh start
-                print("Starting fresh processing...")
+                logger.info("Starting fresh processing...")
 
                 # Step 1: Validate input file
-                print("Step 1: Validating input file...")
+                logger.info("Step 1: Validating input file...")
                 if not self.validate_input_file():
-                    print("FAILED: Cannot proceed with processing")
+                    logger.error("FAILED: Cannot proceed with processing")
                     return False
 
-                # Step 2: Create output file (this initializes the logger)
-                print("Step 2: Creating output file...")
+                # Step 2: Create output file (this also sets up file logging)
+                logger.info("Step 2: Creating output file...")
                 self.workbook, self.output_file = self.create_output_file()
                 start_from_row = START_ROW
-
-                # Now logger is initialized, use it for further logging
-                logger.info("=" * 70)
-                logger.info("Starting Database Update Script")
-                logger.info("=" * 70)
 
             # Step 3: Validate QA data completeness
             logger.info("Step 3: Validating QA sheet data...")
@@ -801,10 +790,6 @@ class DatabaseUpdater:
                 except Exception:
                     pass
 
-            # Close log file handler
-            if self.dual_logger:
-                self.dual_logger.close()
-
 
 def main():
     """Main entry point for the script."""
@@ -813,17 +798,17 @@ def main():
         success = updater.run()
 
         if success:
-            print("Script completed successfully")
+            logger.info("Script completed successfully")
         else:
-            print("Script completed with errors")
+            logger.error("Script completed with errors")
 
         sys.exit(0 if success else 1)
 
     except KeyboardInterrupt:
-        print("\nScript interrupted by user")
+        logger.info("\nScript interrupted by user")
         sys.exit(130)
     except Exception as e:
-        print(f"Fatal error: {e}")
+        logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
 
 
