@@ -505,9 +505,10 @@ def _extract_fields_fallback(response_text: str) -> dict[str, Any]:
     # Extract category (required - critical field)
     category = _extract_category(response_text)
     if category is None:
-        logger.error("Failed to extract category, using None")
-        raise ValueError("Could not extract category from response")
-    result["category"] = category
+        logger.error("Failed to extract category, , using empty string")
+        result["category"] = ""
+    else:
+        result["category"] = category
 
     # Extract confidence (non-critical - use default if failed)
     confidence = _extract_confidence(response_text)

@@ -510,9 +510,10 @@ def _extract_fields_fallback(response_text: str) -> dict[str, Any]:
     # Extract answer (required - critical field)
     answer = _extract_answer(response_text)
     if answer is None:
-        logger.error("Failed to extract answer, using None")
-        raise ValueError("Could not extract answer from response")
-    result["answer"] = answer
+        logger.error("Failed to extract answer, using empty string")
+        result["answer"] = ""
+    else:
+        result["answer"] = answer
 
     # Extract confidence (non-critical - use default if failed)
     confidence = _extract_confidence(response_text)
