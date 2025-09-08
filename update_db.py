@@ -374,7 +374,7 @@ class DatabaseUpdater:
             log_sheet = wb.create_sheet(log_sheet_name)
 
             # Add headers
-            headers = ["Вопрос", "input_text_q", "Ответ", "input_text_a"]
+            headers = ["question", "input_text_q", "answer", "input_text_a"]
             for col_idx, header in enumerate(headers, 1):
                 log_sheet.cell(row=1, column=col_idx, value=header)
 

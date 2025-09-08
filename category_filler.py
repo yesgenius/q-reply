@@ -194,6 +194,31 @@ class CategoryFiller:
         self.resume_state: dict = {}
         self.timestamp: str = ""
 
+    def extract_response_content(self, raw_response: Any) -> str:
+        """Extract content field from LLM response.
+
+        Args:
+            raw_response: Raw response from LLM (dict or str).
+
+        Returns:
+            Content field value or empty string on error.
+        """
+        try:
+            # Convert to dict if string
+            if isinstance(raw_response, str):
+                raw_response = json.loads(raw_response)
+
+            # Navigate: choices[0].message.content
+            content = (
+                raw_response.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            # Ensure string return type
+            return str(content) if content is not None else ""
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError):
+            return ""
+
     def validate_input_file(self) -> bool:
         """Validate that input file exists and has required sheets.
 
@@ -514,15 +539,16 @@ class CategoryFiller:
             # Create new LOG_CATEGORY sheet
             log_sheet = wb.create_sheet(log_sheet_name)
 
-            # Add headers to LOG_CATEGORY sheet
+            # Add headers to LOG_CATEGORY sheet with new Response Content column
             headers = [
-                "Original Category",
-                "Question",
-                "Assigned Category",
-                "Confidence",
-                "Reasoning",
-                "Messages",
-                "Response",
+                "category_original ",
+                "question",
+                "category_assigned",
+                "confidence",
+                "reasoning",
+                "messages",
+                "response",
+                "response_content",  # New column for extracted content
             ]
             for col_idx, header in enumerate(headers, 1):
                 log_sheet.cell(row=1, column=col_idx, value=header)
@@ -611,7 +637,7 @@ class CategoryFiller:
             answer: Optional answer text to provide additional context.
 
         Returns:
-            Dictionary with category, confidence, reasoning, messages, and response.
+            Dictionary with category, confidence, reasoning, messages, response, and response_content.
         """
         import time
 
@@ -629,6 +655,9 @@ class CategoryFiller:
                 # Format messages and response for Excel readability
                 result["messages"] = format_json_for_excel(messages_list)
                 result["response"] = format_json_for_excel(raw_response)
+
+                # Extract content field from response
+                result["response_content"] = self.extract_response_content(raw_response)
 
                 if attempt > 1:
                     logger.info(f"Categorization succeeded on attempt {attempt}")
@@ -655,6 +684,7 @@ class CategoryFiller:
             "reasoning": f"All retry attempts failed. Last error: {last_error!s}",
             "messages": "[]",
             "response": "{}",
+            "response_content": "",
         }
 
     def process_row(
@@ -711,6 +741,9 @@ class CategoryFiller:
                 sheet_log.cell(row=row_idx, column=5, value=result.get("reasoning", ""))
                 sheet_log.cell(row=row_idx, column=6, value=result.get("messages", ""))
                 sheet_log.cell(row=row_idx, column=7, value=result.get("response", ""))
+                sheet_log.cell(
+                    row=row_idx, column=8, value=result.get("response_content", "")
+                )
 
             # Log result
             logger.info(

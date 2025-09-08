@@ -35,7 +35,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 try:
     from db import duckdb_qa_store
     from embeddings import base_embedding
-    from prompts import get_category_prompt, get_answer_prompt
+    from prompts import get_answer_prompt, get_category_prompt
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
     print("Ensure all modules are in the correct paths:")
@@ -201,6 +201,31 @@ class AnswerGenerator:
         self.processed_count: int = 0
         self.resume_state: dict = {}
         self.timestamp: str = ""
+
+    def extract_response_content(self, raw_response: Any) -> str:
+        """Extract content field from LLM response.
+
+        Args:
+            raw_response: Raw response from LLM (dict or str).
+
+        Returns:
+            Content field value or empty string on error.
+        """
+        try:
+            # Convert to dict if string
+            if isinstance(raw_response, str):
+                raw_response = json.loads(raw_response)
+
+            # Navigate: choices[0].message.content
+            content = (
+                raw_response.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            # Ensure string return type
+            return str(content) if content is not None else ""
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError):
+            return ""
 
     def validate_input_files(self) -> bool:
         """Validate that required input files exist and are accessible.
@@ -505,7 +530,7 @@ class AnswerGenerator:
         # Check if headers exist (assuming row 1 is header row)
         if sheet_q.cell(row=1, column=COL_Q_ANSWER).value is None:
             # Add headers for Q sheet
-            q_headers = ["Вопрос", "answer"]
+            q_headers = ["question", "answer"]
             # Add headers for similar Q&A pairs
             for i in range(1, TOP_K_SIMILAR + 1):
                 q_headers.extend([f"q_{i}", f"a_{i}"])
@@ -529,25 +554,27 @@ class AnswerGenerator:
             # Create new LOG_ANSWER sheet
             log_sheet = wb.create_sheet(log_sheet_name)
 
-            # Add headers to LOG_ANSWER sheet with raw response columns
+            # Add headers to LOG_ANSWER sheet with raw response and content columns
             headers = [
-                "Вопрос",
+                "question",
                 "category",
                 "category_confidence",
                 "category_reasoning",
                 "category_messages",
-                "category_response",  # New column for raw category response
+                "category_response",
+                "category_response_content",  # New column
                 "answer",
                 "answer_confidence",
                 "answer_sources_used",
                 "answer_messages",
-                "answer_response",  # New column for raw answer response
+                "answer_response",
+                "answer_response_content",  # New column
             ]
             for col_idx, header in enumerate(headers, 1):
                 log_sheet.cell(row=1, column=col_idx, value=header)
 
             logger.info(
-                f"Created '{log_sheet_name}' sheet with headers including raw responses"
+                f"Created '{log_sheet_name}' sheet with headers including response content columns"
             )
 
             # Create LOG_ANSWER_PARAMS sheet
@@ -665,8 +692,12 @@ class AnswerGenerator:
                 # Add raw response if available
                 if raw_response is not None:
                     result_dict["response"] = format_json_for_excel(raw_response)
+                    result_dict["response_content"] = self.extract_response_content(
+                        raw_response
+                    )
                 else:
                     result_dict["response"] = ""
+                    result_dict["response_content"] = ""
 
                 if attempt > 1:
                     logger.info(f"Categorization succeeded on attempt {attempt}")
@@ -694,6 +725,7 @@ class AnswerGenerator:
             "reasoning": f"All retry attempts failed. Last error: {last_error!s}",
             "messages": "[]",
             "response": "",
+            "response_content": "",
         }
 
     def search_similar_questions(
@@ -764,6 +796,9 @@ class AnswerGenerator:
                 # Format raw response for logging
                 result["response"] = format_json_for_excel(raw_response)
 
+                # Extract content from response
+                result["response_content"] = self.extract_response_content(raw_response)
+
                 if attempt > 1:
                     logger.info(f"Answer generation succeeded on attempt {attempt}")
 
@@ -790,6 +825,7 @@ class AnswerGenerator:
             "sources_used": [],
             "messages": "[]",
             "response": "",
+            "response_content": "",
         }
 
     def process_row(
@@ -877,7 +913,7 @@ class AnswerGenerator:
                 sheet_q.cell(row=row_idx, column=q_col, value=result["question"])
                 sheet_q.cell(row=row_idx, column=a_col, value=result["answer"])
 
-            # Step 6: Write to LOG_ANSWER sheet if enabled (with raw responses)
+            # Step 6: Write to LOG_ANSWER sheet if enabled (with raw responses and content)
             if LOG_ANSWER and sheet_log:
                 col = 1
                 sheet_log.cell(row=row_idx, column=col, value=question_str)
@@ -914,9 +950,15 @@ class AnswerGenerator:
                         value=category_result.get("response", ""),
                     )
                     col += 1
+                    sheet_log.cell(
+                        row=row_idx,
+                        column=col,
+                        value=category_result.get("response_content", ""),
+                    )
+                    col += 1
                 else:
-                    # Skip category columns if no categorization
-                    col += 5
+                    # Skip category columns if no categorization (6 columns total)
+                    col += 6
 
                 sheet_log.cell(
                     row=row_idx, column=col, value=answer_result.get("answer", "")
@@ -938,6 +980,12 @@ class AnswerGenerator:
                 col += 1
                 sheet_log.cell(
                     row=row_idx, column=col, value=answer_result.get("response", "")
+                )
+                col += 1
+                sheet_log.cell(
+                    row=row_idx,
+                    column=col,
+                    value=answer_result.get("response_content", ""),
                 )
 
             logger.info(f"Row {row_idx} processed successfully")
