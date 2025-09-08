@@ -65,9 +65,12 @@ SHEET_LOG_PARAMS = "LOG_ANSWER_PARAMS"  # New sheet for model parameters
 # Column indices for Q sheet (1-based for openpyxl)
 COL_Q_QUESTION = 1  # Column A - Question
 COL_Q_ANSWER = 2  # Column B - Answer
-COL_Q_Q1 = 3  # Column C - First similar question
-COL_Q_A1 = 4  # Column D - First similar answer
-# Additional columns for Q2/A2, Q3/A3, etc. will be dynamic
+COL_Q_CONFIDENCE = 3  # Column C - Answer confidence
+COL_Q_SOURCES = 4  # Column D - Sources used
+COL_Q_S1 = 5  # Column E - First similarity score
+COL_Q_Q1 = 6  # Column F - First similar question
+COL_Q_A1 = 7  # Column G - First similar answer
+# Additional columns for s2/q2/a2, s3/q3/a3, etc. will be dynamic
 
 # Column indices for CATEGORY sheet (1-based for openpyxl)
 COL_CATEGORY_NAME = 1  # Column A
@@ -529,11 +532,16 @@ class AnswerGenerator:
 
         # Check if headers exist (assuming row 1 is header row)
         if sheet_q.cell(row=1, column=COL_Q_ANSWER).value is None:
-            # Add headers for Q sheet
-            q_headers = ["question", "answer"]
-            # Add headers for similar Q&A pairs
+            # Add headers for Q sheet with new columns
+            q_headers = [
+                "question",
+                "answer",
+                "answer_confidence",
+                "answer_sources_used",
+            ]
+            # Add headers for similar Q&A pairs with similarity scores
             for i in range(1, TOP_K_SIMILAR + 1):
-                q_headers.extend([f"q_{i}", f"a_{i}"])
+                q_headers.extend([f"s_{i}", f"q_{i}", f"a_{i}"])
 
             for col_idx, header in enumerate(q_headers, 1):
                 sheet_q.cell(row=1, column=col_idx, value=header)
@@ -738,7 +746,7 @@ class AnswerGenerator:
             category: Optional category filter.
 
         Returns:
-            List of similar Q&A pairs.
+            List of similar Q&A pairs with similarity scores.
         """
         if not self.db_store:
             logger.error("Database store not initialized")
@@ -880,6 +888,8 @@ class AnswerGenerator:
                 sheet_q.cell(
                     row=row_idx, column=COL_Q_ANSWER, value="No similar questions found"
                 )
+                sheet_q.cell(row=row_idx, column=COL_Q_CONFIDENCE, value=0.0)
+                sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value="[]")
                 return True
 
             logger.info(f"Found {len(similar_questions)} similar questions")
@@ -898,18 +908,41 @@ class AnswerGenerator:
                 sheet_q.cell(
                     row=row_idx, column=COL_Q_ANSWER, value="Failed to generate answer"
                 )
+                sheet_q.cell(row=row_idx, column=COL_Q_CONFIDENCE, value=0.0)
+                sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value="[]")
                 return False
 
-            # Step 5: Write results to Q sheet
-            # Write answer
+            # Step 5: Write results to Q sheet with new columns
+            # Write answer and its metadata
             sheet_q.cell(
                 row=row_idx, column=COL_Q_ANSWER, value=answer_result.get("answer", "")
             )
+            sheet_q.cell(
+                row=row_idx,
+                column=COL_Q_CONFIDENCE,
+                value=answer_result.get("confidence", 0.0),
+            )
+            # Format sources_used as string for Excel
+            sources_used = answer_result.get("sources_used", [])
+            if isinstance(sources_used, list):
+                sources_str = json.dumps(sources_used, ensure_ascii=False)
+            else:
+                sources_str = str(sources_used)
+            sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value=sources_str)
 
-            # Write similar Q&A pairs
+            # Write similar Q&A pairs with similarity scores
             for i, result in enumerate(similar_questions[:TOP_K_SIMILAR]):
-                q_col = COL_Q_Q1 + (i * 2)  # Q1, Q2, Q3, etc.
-                a_col = COL_Q_A1 + (i * 2)  # A1, A2, A3, etc.
+                # Calculate column positions: s_i, q_i, a_i
+                s_col = COL_Q_S1 + (i * 3)  # s_1, s_2, s_3, etc.
+                q_col = COL_Q_Q1 + (i * 3)  # q_1, q_2, q_3, etc.
+                a_col = COL_Q_A1 + (i * 3)  # a_1, a_2, a_3, etc.
+
+                # Write similarity score
+                similarity_score = result.get("similarity", 0.0)
+                sheet_q.cell(
+                    row=row_idx, column=s_col, value=round(similarity_score, 4)
+                )
+                # Write question and answer
                 sheet_q.cell(row=row_idx, column=q_col, value=result["question"])
                 sheet_q.cell(row=row_idx, column=a_col, value=result["answer"])
 
