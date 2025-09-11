@@ -26,6 +26,9 @@ import openpyxl
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+# Import centralized logging
+from utils.logger import close_logging, get_logger, setup_logging
+
 
 # ============================================================================
 # CONFIGURATION SECTION - Adjust these settings for IDE execution
@@ -65,69 +68,19 @@ RESUME_FILE = Path(".update_db_resume.json")  # Hidden file for resume state
 # END OF CONFIGURATION SECTION
 # ============================================================================
 
-
-def setup_logging(log_file: Path | None = None) -> None:
-    """Configure unified logging for all modules.
-
-    Sets up consistent logging configuration for the main script and all imported
-    modules to ensure uniform formatting and output handling.
-
-    Args:
-        log_file: Optional path to log file. If provided, logs will be written
-            to both console and file.
-    """
-    # Create formatter with consistent format
-    formatter = logging.Formatter(
-        "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
-    )
-
-    # Get root logger to configure all loggers
-    root_logger = logging.getLogger()
-    root_logger.setLevel(LOG_LEVEL)
-
-    # Remove any existing handlers to avoid duplicates
-    root_logger.handlers.clear()
-
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(LOG_LEVEL)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-
-    # File handler if requested
-    if log_file and LOG_TO_FILE:
-        try:
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_file, encoding="utf-8")
-            file_handler.setLevel(LOG_LEVEL)
-            file_handler.setFormatter(formatter)
-            root_logger.addHandler(file_handler)
-
-            # Log to confirm file logging is active
-            logger = logging.getLogger(__name__)
-            logger.info(f"Logging to file: {log_file}")
-        except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Could not create log file: {e}")
-
-
-# Initialize logging early to capture import messages
-setup_logging()
+# Initialize module logger
+logger = get_logger(__name__)
 
 # Import custom modules after logging setup
 try:
     from db import duckdb_qa_store
     from embeddings import base_embedding
 except ImportError as e:
-    logger = logging.getLogger(__name__)
     logger.error(f"Could not import required modules: {e}")
     logger.error("Ensure modules are in the correct paths:")
     logger.error("  - embeddings/base_embedding.py")
     logger.error("  - db/duckdb_qa_store.py")
     sys.exit(1)
-
-# Get logger for this module
-logger = logging.getLogger(__name__)
 
 
 class DatabaseUpdater:
@@ -347,10 +300,7 @@ class DatabaseUpdater:
         # Setup file logging for this session
         if LOG_TO_FILE:
             log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
-            setup_logging(log_file)
-        else:
-            # Ensure console logging is still active
-            setup_logging()
+            setup_logging(log_file=log_file, level=LOG_LEVEL)
 
         logger.info(f"Copying {INPUT_FILE} to {output_file}")
 
@@ -634,7 +584,7 @@ class DatabaseUpdater:
                 # Setup file logging for resumed session
                 if LOG_TO_FILE:
                     log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
-                    setup_logging(log_file)
+                    setup_logging(log_file=log_file, level=LOG_LEVEL)
                     logger.info("=" * 70)
                     logger.info("RESUMED SESSION")
                     logger.info("=" * 70)
@@ -794,6 +744,9 @@ class DatabaseUpdater:
 def main():
     """Main entry point for the script."""
     try:
+        # Initialize logging for the main application
+        setup_logging(level=LOG_LEVEL)
+
         updater = DatabaseUpdater()
         success = updater.run()
 
@@ -810,6 +763,9 @@ def main():
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        # Clean up logging resources
+        close_logging()
 
 
 if __name__ == "__main__":

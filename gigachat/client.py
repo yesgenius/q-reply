@@ -51,10 +51,12 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from utils.logger import get_logger
+
 from .config import GigaChatConfig
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class GigaChatClient:
@@ -288,27 +290,25 @@ class GigaChatClient:
             )
             response.raise_for_status()
 
-            token_data = response.json()
+            token_data: dict[str, Any] = response.json()
             access_token = token_data.get("access_token")
             if not access_token:
                 raise ValueError("No access_token in response")
 
-            self.access_token = access_token
+            self.access_token = str(access_token)
             logger.debug("Access token received successfully")
 
             # Safely parse expiration time
             self.token_expires_at = self._safe_parse_expiration(token_data)
 
             if self.token_expires_at:
-                expiry_time = datetime.fromtimestamp(
-                    self.token_expires_at, tz=UTC
-                )
+                expiry_time = datetime.fromtimestamp(self.token_expires_at, tz=UTC)
                 logger.info(f"Token obtained, expires at {expiry_time}")
                 logger.debug(f"Token expiration timestamp: {self.token_expires_at}")
             else:
                 logger.info("Token obtained with unknown expiration")
 
-            return access_token
+            return str(access_token)
 
         except requests.RequestException as e:
             logger.error(f"Failed to get access token: {e}")
@@ -376,8 +376,8 @@ class GigaChatClient:
             )
             response.raise_for_status()
 
-            models_data = response.json()
-            models = models_data.get("data", [])
+            models_data: dict[str, Any] = response.json()
+            models: list[dict[str, Any]] = models_data.get("data", [])
             logger.debug(f"Retrieved {len(models)} models")
             return models
 
@@ -535,7 +535,7 @@ class GigaChatClient:
                 timeout=self.config.request_timeout,
             )
             response.raise_for_status()
-            result = response.json()
+            result: dict[str, Any] = response.json()
 
             if logger.isEnabledFor(logging.DEBUG):
                 # Log response metrics
@@ -613,7 +613,7 @@ class GigaChatClient:
             )
             response.raise_for_status()
 
-            result = response.json()
+            result: dict[str, Any] = response.json()
 
             if logger.isEnabledFor(logging.DEBUG):
                 embeddings_data = result.get("data", [])
@@ -641,8 +641,7 @@ class GigaChatClient:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager exit."""
         logger.debug(
-            f"Exiting GigaChatClient context - "
-            f"exc_type: {exc_type}, exc_val: {exc_val}"
+            f"Exiting GigaChatClient context - exc_type: {exc_type}, exc_val: {exc_val}"
         )
         self.close()
 

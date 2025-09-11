@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Question category filler script with answer context and response logging support.
 
 This script automatically fills question categories using GigaChat LLM
@@ -17,7 +17,6 @@ Configuration:
 """
 
 import json
-import logging
 import shutil
 import sys
 from datetime import datetime
@@ -27,6 +26,9 @@ from typing import Any
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
+
+# Import centralized logging
+from utils.logger import close_logging, get_logger, setup_logging
 
 
 # ============================================================================
@@ -60,6 +62,9 @@ RETRY_DELAY = 2  # Delay between retries in seconds (if needed)
 # Logging configuration
 LOG_CATEGORY = True  # Set to False to disable category logging sheet
 LOG_TO_FILE = True  # Enable logging to text file
+import logging
+
+
 LOG_LEVEL = logging.INFO
 # LOG_LEVEL = logging.DEBUG
 
@@ -74,59 +79,18 @@ RESUME_FILE = Path(".category_filler_resume.json")  # Hidden file for resume sta
 # END OF CONFIGURATION SECTION
 # ============================================================================
 
+# Initialize module logger
+logger = get_logger(__name__)
 
-def setup_logging(log_file: Path | None = None) -> None:
-    """Configure logging for all modules used by this script.
-
-    Sets up unified logging configuration for the main script and all imported
-    modules to ensure consistent formatting and output handling.
-
-    Args:
-        log_file: Optional path to log file. If provided, logs will be written
-            to both console and file.
-    """
-    # Create formatter with consistent format
-    formatter = logging.Formatter(
-        "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
-    )
-
-    # Get root logger to configure all loggers
-    root_logger = logging.getLogger()
-    root_logger.setLevel(LOG_LEVEL)
-
-    # Remove any existing handlers to avoid duplicates
-    root_logger.handlers.clear()
-
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(LOG_LEVEL)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-
-    # File handler if requested
-    if log_file and LOG_TO_FILE:
-        try:
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_file, encoding="utf-8")
-            file_handler.setLevel(LOG_LEVEL)
-            file_handler.setFormatter(formatter)
-            root_logger.addHandler(file_handler)
-
-            # Log to confirm file logging is active
-            logger = logging.getLogger(__name__)
-            logger.info(f"Logging to file: {log_file}")
-        except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Could not create log file: {e}")
-
-
-# Import the categorization module AFTER setting up logging
+# Import the categorization module AFTER getting logger
 # This ensures the module inherits our logging configuration
 try:
     from prompts import get_category_prompt
-except ImportError:
-    print("Error: Could not import get_category_prompt module")
-    print("Ensure the module is in the correct path: prompts/get_category_prompt.py")
+except ImportError as e:
+    logger.error(f"Could not import get_category_prompt module: {e}")
+    logger.error(
+        "Ensure the module is in the correct path: prompts/get_category_prompt.py"
+    )
     sys.exit(1)
 
 
@@ -173,13 +137,8 @@ def format_json_for_excel(data: Any) -> str:
 
     except (TypeError, ValueError) as e:
         # If formatting fails, return string representation
-        logger = logging.getLogger(__name__)
         logger.debug(f"JSON formatting failed: {e}")
         return str(data)
-
-
-# Get logger for this module
-logger = logging.getLogger(__name__)
 
 
 class CategoryFiller:
@@ -509,12 +468,10 @@ class CategoryFiller:
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         output_file = OUTPUT_DIR / f"QA_{self.timestamp}.xlsx"
 
-        # Setup logging with file output
+        # Setup file logging for this session
         if LOG_TO_FILE:
             log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
-            setup_logging(log_file)
-        else:
-            setup_logging()
+            setup_logging(log_file=log_file, level=LOG_LEVEL)
 
         logger.info(f"Copying {INPUT_FILE} to {output_file}")
 
@@ -765,9 +722,6 @@ class CategoryFiller:
             True if execution completed successfully, False otherwise.
         """
         try:
-            # Setup initial logging to console only
-            setup_logging()
-
             logger.info("=" * 70)
             logger.info("Starting Category Filler Script")
             logger.info(
@@ -789,10 +743,10 @@ class CategoryFiller:
                 if filename.startswith("QA_"):
                     self.timestamp = filename[3:]  # Remove "QA_" prefix
 
-                # Setup logging with file for resumed session
+                # Setup file logging for resumed session
                 if LOG_TO_FILE:
                     log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
-                    setup_logging(log_file)
+                    setup_logging(log_file=log_file, level=LOG_LEVEL)
                     logger.info("=" * 70)
                     logger.info("RESUMED SESSION")
                     logger.info("=" * 70)
@@ -1012,6 +966,9 @@ class CategoryFiller:
 def main():
     """Main entry point for the script."""
     try:
+        # Initialize logging for the main application
+        setup_logging(level=LOG_LEVEL)
+
         filler = CategoryFiller()
         success = filler.run()
 
@@ -1029,6 +986,9 @@ def main():
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        # Clean up logging resources
+        close_logging()
 
 
 if __name__ == "__main__":

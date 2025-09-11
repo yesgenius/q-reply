@@ -20,11 +20,11 @@ Usage:
 import logging
 from typing import Any
 
-
-logger = logging.getLogger(__name__)
-
 from gigachat.client import GigaChatClient
+from utils.logger import get_logger
 
+
+logger = get_logger(__name__)
 
 # Initialize GigaChat client
 llm = GigaChatClient()
@@ -176,13 +176,19 @@ def create_embeddings(
 
     Examples:
         >>> # Document embedding (no instruction)
-        >>> doc_emb, input_texts = create_embeddings("Product description", task_type="document")
+        >>> doc_emb, input_texts = create_embeddings(
+        ...     "Product description", task_type="document"
+        ... )
 
         >>> # Query embedding (with instruction)
-        >>> query_emb, input_texts = create_embeddings("What is this product?", task_type="query")
+        >>> query_emb, input_texts = create_embeddings(
+        ...     "What is this product?", task_type="query"
+        ... )
 
         >>> # Batch processing
-        >>> embs, input_texts = create_embeddings(["text1", "text2"], task_type="similarity")
+        >>> embs, input_texts = create_embeddings(
+        ...     ["text1", "text2"], task_type="similarity"
+        ... )
     """
     # Ensure texts is a list
     if isinstance(texts, str):
@@ -230,7 +236,7 @@ def create_embeddings(
             # Show sample texts
             for i, text in enumerate(prepared_texts[:2]):
                 preview = text[:200] + "..." if len(text) > 200 else text
-                logger.debug(f"  Sample {i+1}: {preview}")
+                logger.debug(f"  Sample {i + 1}: {preview}")
             if len(prepared_texts) > 2:
                 logger.debug("  ...")
 
@@ -414,20 +420,20 @@ if __name__ == "__main__":
         # Check embeddings
         assert isinstance(result, list), f"Expected list, got {type(result)}"
         assert len(result) == 1, f"Expected 1 embedding, got {len(result)}"
-        assert isinstance(
-            result[0], list
-        ), f"Expected list of floats, got {type(result[0])}"
+        assert isinstance(result[0], list), (
+            f"Expected list of floats, got {type(result[0])}"
+        )
         assert len(result[0]) > 0, "Embedding vector is empty"
-        assert all(
-            isinstance(x, (int, float)) for x in result[0]
-        ), "Embedding should contain numbers"
+        assert all(isinstance(x, (int, float)) for x in result[0]), (
+            "Embedding should contain numbers"
+        )
 
         # Check input_texts
         assert isinstance(input_texts, list), f"Expected list, got {type(input_texts)}"
         assert len(input_texts) == 1, f"Expected 1 input text, got {len(input_texts)}"
-        assert (
-            input_texts[0] == text
-        ), "Input text should match original for document type"
+        assert input_texts[0] == text, (
+            "Input text should match original for document type"
+        )
 
     run_test("Single text embedding", test_single_text, skip_on_api_error=True)
 
@@ -445,16 +451,16 @@ if __name__ == "__main__":
         assert first_dim > 0, "Embedding dimension is 0"
 
         for i, emb in enumerate(results):
-            assert (
-                len(emb) == first_dim
-            ), f"Embedding {i} has different dimension: {len(emb)} vs {first_dim}"
+            assert len(emb) == first_dim, (
+                f"Embedding {i} has different dimension: {len(emb)} vs {first_dim}"
+            )
             assert isinstance(emb, list), f"Embedding {i} is not a list"
 
         # Check input_texts
         assert len(input_texts) == 3, f"Expected 3 input texts, got {len(input_texts)}"
-        assert (
-            input_texts == texts
-        ), "Input texts should match originals for document type"
+        assert input_texts == texts, (
+            "Input texts should match originals for document type"
+        )
 
     run_test("Multiple texts batch", test_multiple_texts, skip_on_api_error=True)
 
@@ -469,7 +475,7 @@ if __name__ == "__main__":
         assert input_texts[0].startswith(expected_prefix), (
             f"Input text should start with instruction.\n"
             f"Expected prefix: {expected_prefix}\n"
-            f"Got: {input_texts[0][:len(expected_prefix)]}"
+            f"Got: {input_texts[0][: len(expected_prefix)]}"
         )
         assert text in input_texts[0], "Original text should be in input_texts"
 
@@ -516,12 +522,12 @@ if __name__ == "__main__":
             assert len(emb) == first_dim, f"Embedding {i} has different dimension"
 
         # Check input_texts
-        assert (
-            len(batch_input_texts) == 7
-        ), f"Expected 7 input texts, got {len(batch_input_texts)}"
-        assert (
-            batch_input_texts == texts
-        ), "Input texts should match originals for document type"
+        assert len(batch_input_texts) == 7, (
+            f"Expected 7 input texts, got {len(batch_input_texts)}"
+        )
+        assert batch_input_texts == texts, (
+            "Input texts should match originals for document type"
+        )
 
     run_test(
         "Batch embeddings with input",
@@ -542,8 +548,7 @@ if __name__ == "__main__":
 
         for i, input_text in enumerate(input_texts):
             assert input_text.startswith(expected_prefix), (
-                f"Input text {i} should start with instruction.\n"
-                f"Got: {input_text[:50]}"
+                f"Input text {i} should start with instruction.\nGot: {input_text[:50]}"
             )
             assert texts[i] in input_text, f"Original text {i} should be in input_text"
 
@@ -586,9 +591,9 @@ if __name__ == "__main__":
             create_embeddings([])
             assert False, "Should have raised ValueError for empty input"
         except ValueError as e:
-            assert (
-                "empty" in str(e).lower()
-            ), f"Error message should mention 'empty': {e}"
+            assert "empty" in str(e).lower(), (
+                f"Error message should mention 'empty': {e}"
+            )
 
     run_test("Empty input validation", test_empty_input)
 

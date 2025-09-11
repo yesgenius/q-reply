@@ -38,12 +38,13 @@ from collections.abc import (
     Generator,
     Generator as GeneratorType,
 )
-from typing import Any
+from typing import Any, cast
 
 from gigachat.client import GigaChatClient
+from utils.logger import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Initialize LLM client (can be replaced with other providers)
 llm = GigaChatClient()
@@ -229,9 +230,9 @@ def update_system_prompt(**kwargs: Any) -> str:
         logger.debug("Using cached/pre-initialized system prompt")
 
     # Ensure we always return a string for type consistency
-    assert (
-        _system_prompt is not None
-    ), "System prompt should never be None at this point"
+    assert _system_prompt is not None, (
+        "System prompt should never be None at this point"
+    )
     return _system_prompt
 
 
@@ -453,7 +454,7 @@ def run(
             raise RuntimeError("Expected generator for streaming response")
         # For non-streaming, extract content from response
         if isinstance(response, dict) and "choices" in response:
-            return response["choices"][0]["message"]["content"]
+            return cast("str", response["choices"][0]["message"]["content"])
         raise RuntimeError(f"Unexpected response format: {type(response)}")
 
     except Exception as e:

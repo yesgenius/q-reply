@@ -1,7 +1,7 @@
 """DuckDB wrapper for a Q&A store with vector embeddings (simple & reliable).
 
 This module provides a minimal, maintainable wrapper around DuckDB for storing
-question–answer pairs with fixed-size float embeddings and performing
+question - answer pairs with fixed-size float embeddings and performing
 cosine-similarity search **inside SQL**.
 
 Design goals:
@@ -12,10 +12,9 @@ Design goals:
 
 from __future__ import annotations
 
-import logging
 import re
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import duckdb
 import numpy as np
@@ -29,7 +28,10 @@ DEFAULT_EMBEDDING_SIZE = 2560
 DEFAULT_SIMILARITY_THRESHOLD = 0.15
 DEFAULT_TOP_K = 5
 
-logger = logging.getLogger(__name__)
+from utils.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class QADatabaseStore:
@@ -200,7 +202,7 @@ class QADatabaseStore:
         if norm == 0.0:
             raise ValueError("Zero-norm embedding is not allowed.")
 
-        return (arr / norm).tolist()
+        return cast("list[float]", (arr / norm).tolist())
 
     # ------------------------------- Queries ---------------------------------
 
@@ -317,7 +319,7 @@ class QADatabaseStore:
             self.conn.execute(
                 f"""
                 UPDATE qa_records
-                SET answer = ?, 
+                SET answer = ?,
                     answer_embedding = CAST(? AS FLOAT[{self.embedding_size}]),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE question = ?

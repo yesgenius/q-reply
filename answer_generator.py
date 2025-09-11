@@ -30,20 +30,9 @@ import openpyxl
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+# Import centralized logging
+from utils.logger import close_logging, get_logger, setup_logging
 
-# Import required modules
-try:
-    from db import duckdb_qa_store
-    from embeddings import base_embedding
-    from prompts import get_answer_prompt, get_category_prompt
-except ImportError as e:
-    print(f"Error: Could not import required modules: {e}")
-    print("Ensure all modules are in the correct paths:")
-    print("  - db/duckdb_qa_store.py")
-    print("  - embeddings/base_embedding.py")
-    print("  - prompts/get_category_prompt.py")
-    print("  - prompts/get_answer_prompt.py")
-    sys.exit(1)
 
 # ============================================================================
 # CONFIGURATION SECTION - Adjust these settings for IDE execution
@@ -105,55 +94,22 @@ RESUME_FILE = Path(".answer_generator_resume.json")  # Hidden file for resume st
 # END OF CONFIGURATION SECTION
 # ============================================================================
 
-
-def setup_logging(log_file: Path | None = None) -> None:
-    """Configure unified logging for all modules.
-
-    Sets up consistent logging configuration for the main script and all imported
-    modules to ensure uniform formatting and output handling across the entire
-    application.
-
-    Args:
-        log_file: Optional path to log file. If provided, logs will be written
-            to both console and file.
-    """
-    # Create formatter with consistent format
-    formatter = logging.Formatter(
-        "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
-    )
-
-    # Get root logger to configure all loggers
-    root_logger = logging.getLogger()
-    root_logger.setLevel(LOG_LEVEL)
-
-    # Remove any existing handlers to avoid duplicates
-    root_logger.handlers.clear()
-
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(LOG_LEVEL)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-
-    # File handler if requested
-    if log_file and LOG_TO_FILE:
-        try:
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_file, encoding="utf-8")
-            file_handler.setLevel(LOG_LEVEL)
-            file_handler.setFormatter(formatter)
-            root_logger.addHandler(file_handler)
-
-            # Log to confirm file logging is active
-            logger = logging.getLogger(__name__)
-            logger.info(f"Logging to file: {log_file}")
-        except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Could not create log file: {e}")
-
-
 # Initialize module logger
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+# Import required modules after logging setup
+try:
+    from db import duckdb_qa_store
+    from embeddings import base_embedding
+    from prompts import get_answer_prompt, get_category_prompt
+except ImportError as e:
+    logger.error(f"Error: Could not import required modules: {e}")
+    logger.error("Ensure all modules are in the correct paths:")
+    logger.error("  - db/duckdb_qa_store.py")
+    logger.error("  - embeddings/base_embedding.py")
+    logger.error("  - prompts/get_category_prompt.py")
+    logger.error("  - prompts/get_answer_prompt.py")
+    sys.exit(1)
 
 
 def format_json_for_excel(data: Any) -> str:
@@ -404,6 +360,7 @@ class AnswerGenerator:
             ("SAVE_FREQUENCY", SAVE_FREQUENCY, "Save file every N rows"),
             ("LOG_ANSWER", LOG_ANSWER, "Enable detailed logging sheet"),
             ("LOG_TO_FILE", LOG_TO_FILE, "Enable logging to text file"),
+            ("LOG_LEVEL", logging.getLevelName(LOG_LEVEL), "Logging detail level"),
             ("START_ROW", START_ROW, "First row to process (skip headers)"),
         ]
 
@@ -511,12 +468,10 @@ class AnswerGenerator:
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         output_file = OUTPUT_DIR / f"Q_{self.timestamp}.xlsx"
 
-        # Initialize unified logging for all modules
+        # Setup file logging for this session
         if LOG_TO_FILE:
             log_file = OUTPUT_DIR / f"Q_{self.timestamp}.log"
-            setup_logging(log_file)
-        else:
-            setup_logging()
+            setup_logging(log_file=log_file, level=LOG_LEVEL)
 
         logger.info(f"Copying {INPUT_FILE_Q} to {output_file}")
 
@@ -1036,9 +991,6 @@ class AnswerGenerator:
             True if execution completed successfully, False otherwise.
         """
         try:
-            # Setup initial logging to console only
-            setup_logging()
-
             logger.info("=" * 70)
             logger.info("Starting Answer Generator Script")
             logger.info(f"Log Answer: {'ENABLED' if LOG_ANSWER else 'DISABLED'}")
@@ -1059,10 +1011,10 @@ class AnswerGenerator:
                 if filename.startswith("Q_"):
                     self.timestamp = filename[2:]  # Remove "Q_" prefix
 
-                # Re-initialize unified logging for resumed session
+                # Setup file logging for resumed session
                 if LOG_TO_FILE:
                     log_file = OUTPUT_DIR / f"Q_{self.timestamp}.log"
-                    setup_logging(log_file)
+                    setup_logging(log_file=log_file, level=LOG_LEVEL)
                     logger.info("=" * 70)
                     logger.info("RESUMED SESSION")
                     logger.info("=" * 70)
@@ -1262,6 +1214,9 @@ class AnswerGenerator:
 def main():
     """Main entry point for the script."""
     try:
+        # Initialize logging for the main application
+        setup_logging(level=LOG_LEVEL)
+
         generator = AnswerGenerator()
         success = generator.run()
 
@@ -1279,6 +1234,9 @@ def main():
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        # Clean up logging resources
+        close_logging()
 
 
 if __name__ == "__main__":

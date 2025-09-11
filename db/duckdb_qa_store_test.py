@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import cast
 
 import numpy as np
 
@@ -72,7 +73,7 @@ def generate_fake_embedding(text: str, size: int) -> list[float]:
     else:
         vec /= norm
 
-    return vec.tolist()
+    return cast("list[float]", vec.tolist())
 
 
 def duckdb_supports_array_cosine(db: QADatabaseStore) -> bool:
@@ -174,9 +175,9 @@ def main() -> None:
     )
     assert ok, "Update must succeed"
     refetched = db.find_question(test_qa_pairs[0]["question"])
-    assert (
-        refetched is not None and refetched["answer"] == new_answer
-    ), "Update not visible"
+    assert refetched is not None and refetched["answer"] == new_answer, (
+        "Update not visible"
+    )
 
     # 5) Update category
     logger.info("5) Update category")
@@ -241,22 +242,22 @@ def main() -> None:
         )
 
         # Higher threshold should return fewer or equal results
-        assert len(results_high_threshold) <= len(
-            results_mid_threshold
-        ), f"High threshold ({len(results_high_threshold)}) should yield fewer results than mid ({len(results_mid_threshold)})"
-        assert len(results_mid_threshold) <= len(
-            results_low_threshold
-        ), f"Mid threshold ({len(results_mid_threshold)}) should yield fewer results than low ({len(results_low_threshold)})"
+        assert len(results_high_threshold) <= len(results_mid_threshold), (
+            f"High threshold ({len(results_high_threshold)}) should yield fewer results than mid ({len(results_mid_threshold)})"
+        )
+        assert len(results_mid_threshold) <= len(results_low_threshold), (
+            f"Mid threshold ({len(results_mid_threshold)}) should yield fewer results than low ({len(results_low_threshold)})"
+        )
 
         # Verify all results meet threshold requirement
         for r in results_high_threshold:
-            assert (
-                r["similarity"] >= 0.8
-            ), f"Result similarity {r['similarity']} below threshold 0.8"
+            assert r["similarity"] >= 0.8, (
+                f"Result similarity {r['similarity']} below threshold 0.8"
+            )
         for r in results_mid_threshold:
-            assert (
-                r["similarity"] >= 0.3
-            ), f"Result similarity {r['similarity']} below threshold 0.3"
+            assert r["similarity"] >= 0.3, (
+                f"Result similarity {r['similarity']} below threshold 0.3"
+            )
 
         logger.info("  - Threshold 0.8: %d results", len(results_high_threshold))
         logger.info("  - Threshold 0.3: %d results", len(results_mid_threshold))
@@ -278,12 +279,12 @@ def main() -> None:
 
         # Results should increase or stay same as k increases
         assert len(results_k1) <= len(results_k3), "k=1 should have <= results than k=3"
-        assert len(results_k3) <= len(
-            results_k10
-        ), "k=3 should have <= results than k=10"
-        assert len(results_k10) <= len(
-            results_k50
-        ), "k=10 should have <= results than k=50"
+        assert len(results_k3) <= len(results_k10), (
+            "k=3 should have <= results than k=10"
+        )
+        assert len(results_k10) <= len(results_k50), (
+            "k=10 should have <= results than k=50"
+        )
 
         logger.info("  - top_k=1: %d results", len(results_k1))
         logger.info("  - top_k=3: %d results", len(results_k3))
@@ -310,22 +311,22 @@ def main() -> None:
         )
 
         # Category filter should reduce or maintain result count
-        assert len(results_age_cat) <= len(
-            results_no_filter
-        ), f"Filtered results ({len(results_age_cat)}) exceed unfiltered ({len(results_no_filter)})"
-        assert len(results_terms_cat) <= len(
-            results_no_filter
-        ), f"Filtered results ({len(results_terms_cat)}) exceed unfiltered ({len(results_no_filter)})"
+        assert len(results_age_cat) <= len(results_no_filter), (
+            f"Filtered results ({len(results_age_cat)}) exceed unfiltered ({len(results_no_filter)})"
+        )
+        assert len(results_terms_cat) <= len(results_no_filter), (
+            f"Filtered results ({len(results_terms_cat)}) exceed unfiltered ({len(results_no_filter)})"
+        )
 
         # Verify all filtered results have correct category
         for r in results_age_cat:
-            assert (
-                r["category"] == "Возрастные ограничения"
-            ), f"Result has wrong category: {r['category']}"
+            assert r["category"] == "Возрастные ограничения", (
+                f"Result has wrong category: {r['category']}"
+            )
         for r in results_terms_cat:
-            assert (
-                r["category"] == "Условия карты"
-            ), f"Result has wrong category: {r['category']}"
+            assert r["category"] == "Условия карты", (
+                f"Result has wrong category: {r['category']}"
+            )
 
         logger.info("  - No filter: %d results", len(results_no_filter))
         logger.info(
@@ -340,9 +341,9 @@ def main() -> None:
 
         if len(results) > 1:
             for i in range(1, len(results)):
-                assert (
-                    results[i - 1]["similarity"] >= results[i]["similarity"]
-                ), f"Results not ordered: {results[i-1]['similarity']} < {results[i]['similarity']}"
+                assert results[i - 1]["similarity"] >= results[i]["similarity"], (
+                    f"Results not ordered: {results[i - 1]['similarity']} < {results[i]['similarity']}"
+                )
             logger.info("  - Results correctly ordered by descending similarity")
 
         # Test 6.5: Edge cases
@@ -361,9 +362,9 @@ def main() -> None:
         results_no_cat = db.search_similar_questions(
             query_emb, category="NonExistentCategory", top_k=10, threshold=0.0
         )
-        assert (
-            len(results_no_cat) == 0
-        ), "Non-existent category should return no results"
+        assert len(results_no_cat) == 0, (
+            "Non-existent category should return no results"
+        )
         logger.info("  - Non-existent category: 0 results (as expected)")
 
     else:
