@@ -37,7 +37,7 @@ from utils.logger import close_logging, get_logger, setup_logging
 # File paths
 INPUT_FILE = Path("in/QA.xlsx")
 OUTPUT_DIR = Path("out")
-DB_PATH = "qa.duckdb"
+DB_PATH = "storages/qa.duckdb"
 
 # Sheet names
 SHEET_QA = "QA"
@@ -73,8 +73,8 @@ logger = get_logger(__name__)
 
 # Import custom modules after logging setup
 try:
-    from db import duckdb_qa_store
     from embeddings import base_embedding
+    from storages import duckdb_qa_store
 except ImportError as e:
     logger.error(f"Could not import required modules: {e}")
     logger.error("Ensure modules are in the correct paths:")

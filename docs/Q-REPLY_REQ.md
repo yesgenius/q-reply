@@ -160,7 +160,7 @@
      - Получает эмбеддинги вопроса с помощью `embeddings.base_embedding.create_embeddings()`
      - Определяет категорию из словаря категорий с помощью `prompts.get_category_prompt.run()`, если категории есть
      - Фильтрация вопросов БД по определенной категории, если категории есть
-     - Поиск `N` наиболее близких вопросов по `cosine similarity` с помощью `db.duckdb_qa_store.search_similar_questions()`, если не найдено - перейти к следующей строке
+     - Поиск `N` наиболее близких вопросов по `cosine similarity` с помощью `storages.duckdb_qa_store.search_similar_questions()`, если не найдено - перейти к следующей строке
      - Формирование контекста для `LLM`
        - из описания конференции (необязательное поле)
        - из `N` найденных вопросов-ответов (обязательное поле)
@@ -168,8 +168,8 @@
      - Сохранение результата на лист `Q_YYYY-MM-DD_HHMMSS.Q`
        - **Вопрос** — вопросы из `Q_YYYY-MM-DD_HHMMSS.Q`
        - **answer** — заполняется из `JSON` после выполнения `prompts.get_answer_prompt.run()`
-       - **q_1** — первый вопрос из `N` найденных заполняется из `db.duckdb_qa_store.search_similar_questions()`
-       - **a_1** — первый ответ из `N` найденных заполняется из `db.duckdb_qa_store.search_similar_questions()`
+       - **q_1** — первый вопрос из `N` найденных заполняется из `storages.duckdb_qa_store.search_similar_questions()`
+       - **a_1** — первый ответ из `N` найденных заполняется из `storages.duckdb_qa_store.search_similar_questions()`
        - далее `N-1` повторений **q_n** + **a_n**
      - Формирует строку на листе `Q_YYYY-MM-DD_HHMMSS.LOG_ANSWER` с информацией для контроля над процессом формирования ответа `gigachat.client`, если `log_answer == True`
        - положение каждой строки лога соответствует положению обрабатываемой строки на листе `Q_YYYY-MM-DD_HHMMSS.Q`
@@ -279,14 +279,12 @@ q-reply/
 │   ├── base_embedding.py                  # модуль с базовыми функциями с инструкциями для модели, для получения эмбеддингов
 │   └── ...
 │
-├── db/                                    # ПАКЕТ КАСТОМНЫХ ОБЕРТОК ДЛЯ БД
+├── storages/                                    # ПАКЕТ КАСТОМНЫХ ОБЕРТОК ДЛЯ БД
 │   ├── README.md
 │   ├── __init__.py
 │   ├── duckdb_qa_store.py                 # модуль с классом QADatabaseStore и базовыми методами для реализации проекта
 │   ├── duckdb_qa_store_test.py            # модуль тестирования duckdb_qa_store.py
-│   └── ...
-│
-├── qa.duckdb                              # База данных
+│   └── qa.duckdb                          # База данных
 │
 ├── docs/
 │   ├── README.md

@@ -23,6 +23,7 @@ import shutil
 import sys
 import time
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,7 @@ from utils.logger import close_logging, get_logger, setup_logging
 # File paths
 INPUT_FILE_Q = Path("in/Q.xlsx")
 INPUT_FILE_QA = Path("in/QA.xlsx")
-DATABASE_FILE = Path("qa.duckdb")
+DATABASE_FILE = Path("storages/qa.duckdb")
 OUTPUT_DIR = Path("out")
 
 # Sheet names
@@ -61,6 +62,17 @@ COL_Q_Q1 = 6  # Column F - First similar question
 COL_Q_A1 = 7  # Column G - First similar answer
 # Additional columns for s2/q2/a2, s3/q3/a3, etc. will be dynamic
 
+
+class CategorySearchMode(Enum):
+    """Defines how categories are used in similarity search."""
+
+    WITH_CATEGORY = "with_category"  # Search using detected category
+    WITHOUT_CATEGORY = "without_category"  # Ignore categories in search
+    CATEGORY_FALLBACK = (
+        "category_fallback"  # Try with category first, fallback to without
+    )
+
+
 # Column indices for CATEGORY sheet (1-based for openpyxl)
 COL_CATEGORY_NAME = 1  # Column A
 COL_CATEGORY_DESC = 2  # Column B
@@ -68,6 +80,9 @@ COL_CATEGORY_DESC = 2  # Column B
 # Search configuration
 TOP_K_SIMILAR = 5  # Number of similar questions to retrieve
 SIMILARITY_THRESHOLD = 0.15  # Minimum cosine similarity
+CATEGORY_SEARCH_MODE = (
+    CategorySearchMode.WITHOUT_CATEGORY
+)  # How to use categories in search
 
 # Embedding configuration
 EMBEDDING_MODEL = "EmbeddingsGigaR"
@@ -76,7 +91,7 @@ EMBEDDING_DIMENSION = 2560
 # Retry configuration
 MAX_RETRY_ATTEMPTS_CATEGORY = 3  # Maximum retry attempts for categorization
 MAX_RETRY_ATTEMPTS_ANSWER = 3  # Maximum retry attempts for answer generation
-RETRY_DELAY = 1  # Delay between retries in seconds
+RETRY_DELAY = 2  # Delay between retries in seconds
 
 # Logging configuration
 LOG_ANSWER = True  # Set to False to disable answer logging sheet
@@ -99,9 +114,9 @@ logger = get_logger(__name__)
 
 # Import required modules after logging setup
 try:
-    from db import duckdb_qa_store
     from embeddings import base_embedding
     from prompts import get_answer_prompt, get_category_prompt
+    from storages import duckdb_qa_store
 except ImportError as e:
     logger.error(f"Error: Could not import required modules: {e}")
     logger.error("Ensure all modules are in the correct paths:")
@@ -344,6 +359,11 @@ class AnswerGenerator:
             ("Timestamp", self.timestamp, "Processing start time"),
             ("TOP_K_SIMILAR", TOP_K_SIMILAR, "Number of similar questions to retrieve"),
             ("SIMILARITY_THRESHOLD", SIMILARITY_THRESHOLD, "Minimum cosine similarity"),
+            (
+                "CATEGORY_SEARCH_MODE",
+                CATEGORY_SEARCH_MODE.value,
+                "How categories are used in search",
+            ),
             ("EMBEDDING_MODEL", EMBEDDING_MODEL, "Model for embeddings"),
             ("EMBEDDING_DIMENSION", EMBEDDING_DIMENSION, "Embedding vector size"),
             (
@@ -696,6 +716,11 @@ class AnswerGenerator:
     ) -> list[dict[str, Any]]:
         """Search for similar questions in the database.
 
+        Uses CATEGORY_SEARCH_MODE to determine how to handle category filtering:
+        - WITH_CATEGORY: Use category if provided
+        - WITHOUT_CATEGORY: Always ignore category
+        - CATEGORY_FALLBACK: Try with category first, then without if no results
+
         Args:
             question: The question to search for.
             category: Optional category filter.
@@ -717,13 +742,59 @@ class AnswerGenerator:
                 logger.error("Failed to create embedding for question")
                 return []
 
-            # Search in database
-            results = self.db_store.search_similar_questions(
-                question_embedding=embeddings[0],
-                category=category,
-                top_k=TOP_K_SIMILAR,
-                threshold=SIMILARITY_THRESHOLD,
-            )
+            # Determine search strategy based on mode
+            if CATEGORY_SEARCH_MODE == CategorySearchMode.WITHOUT_CATEGORY:
+                # Always search without category
+                logger.debug(
+                    "Searching without category filter (mode: WITHOUT_CATEGORY)"
+                )
+                results = self.db_store.search_similar_questions(
+                    question_embedding=embeddings[0],
+                    category=None,
+                    top_k=TOP_K_SIMILAR,
+                    threshold=SIMILARITY_THRESHOLD,
+                )
+            elif CATEGORY_SEARCH_MODE == CategorySearchMode.WITH_CATEGORY:
+                # Use category if available
+                if category:
+                    logger.debug(f"Searching with category filter: {category}")
+                else:
+                    logger.debug("No category available, searching without filter")
+                results = self.db_store.search_similar_questions(
+                    question_embedding=embeddings[0],
+                    category=category,
+                    top_k=TOP_K_SIMILAR,
+                    threshold=SIMILARITY_THRESHOLD,
+                )
+            # Try with category first, then without if no results
+            elif category:
+                logger.debug(f"Trying search with category filter: {category}")
+                results = self.db_store.search_similar_questions(
+                    question_embedding=embeddings[0],
+                    category=category,
+                    top_k=TOP_K_SIMILAR,
+                    threshold=SIMILARITY_THRESHOLD,
+                )
+
+                if not results:
+                    logger.info(
+                        "No results with category, falling back to search without filter"
+                    )
+                    results = self.db_store.search_similar_questions(
+                        question_embedding=embeddings[0],
+                        category=None,
+                        top_k=TOP_K_SIMILAR,
+                        threshold=SIMILARITY_THRESHOLD,
+                    )
+            else:
+                # No category to use, search without filter
+                logger.debug("No category available, searching without filter")
+                results = self.db_store.search_similar_questions(
+                    question_embedding=embeddings[0],
+                    category=None,
+                    top_k=TOP_K_SIMILAR,
+                    threshold=SIMILARITY_THRESHOLD,
+                )
 
             return results
 
@@ -994,6 +1065,7 @@ class AnswerGenerator:
             logger.info("=" * 70)
             logger.info("Starting Answer Generator Script")
             logger.info(f"Log Answer: {'ENABLED' if LOG_ANSWER else 'DISABLED'}")
+            logger.info(f"Category Search Mode: {CATEGORY_SEARCH_MODE.value}")
             logger.info(f"Max Retry Attempts (Category): {MAX_RETRY_ATTEMPTS_CATEGORY}")
             logger.info(f"Max Retry Attempts (Answer): {MAX_RETRY_ATTEMPTS_ANSWER}")
             logger.info("=" * 70)

@@ -53,8 +53,8 @@ llm = GigaChatClient()
 
 # Model parameters optimized for structured output
 params: dict[str, Any] = {
-    "model": "GigaChat-2-Pro",
-    # "model": "GigaChat",
+    # "model": "GigaChat-2-Pro",
+    "model": "GigaChat",
     # "temperature": 0.1,  # Low temperature for consistent categorization
     # "top_p": 0.95,
     "stream": False,
@@ -222,7 +222,6 @@ VALIDATE YOUR OUTPUT AGAINST THIS SCHEMA:
         )
     }
 """
-
     return prompt
 
 
@@ -507,7 +506,7 @@ def _extract_fields_fallback(response_text: str) -> dict[str, Any]:
     # Extract category (required - critical field)
     category = _extract_category(response_text)
     if category is None:
-        logger.error("Failed to extract category, , using empty string")
+        logger.error("Failed to extract category, using empty string")
         result["category"] = ""
     else:
         result["category"] = category
@@ -684,16 +683,16 @@ def run(
 
     try:
         # Make LLM request
-        response = llm.chat_completion(messages=messages_list, **request_params)
+        raw_response = llm.chat_completion(messages=messages_list, **request_params)
 
         # Safely extract content from response with proper validation
-        if not isinstance(response, dict):
-            raise RuntimeError(f"Expected dict response, got {type(response)}")
+        if not isinstance(raw_response, dict):
+            raise RuntimeError(f"Expected dict response, got {type(raw_response)}")
 
-        if "choices" not in response:
+        if "choices" not in raw_response:
             raise RuntimeError("Response missing 'choices' field")
 
-        choices = response["choices"]
+        choices = raw_response["choices"]
         if not isinstance(choices, list) or len(choices) == 0:
             raise RuntimeError("Response 'choices' is empty or invalid")
 
@@ -715,9 +714,6 @@ def run(
 
         # Validate category against current categories if available
         if _current_categories and parsed_result["category"] not in _current_categories:
-            logger.error(
-                f"Invalid category '{parsed_result['category']}' in response: {response_text}"
-            )
             raise ValueError(
                 f"Invalid category '{parsed_result['category']}'. "
                 f"Must be one of: {', '.join(_current_categories.keys())}"
@@ -725,10 +721,14 @@ def run(
 
         # Return as formatted JSON string with messages and raw response
         result_json = json.dumps(parsed_result, ensure_ascii=False, indent=2)
-        return result_json, messages_list, response
+        return result_json, messages_list, raw_response
 
     except Exception as e:
         logger.error(f"Categorization failed: {e}")
+        logger.error(f"    message['content']: ['{message['content']}]'")
+        logger.error(f"    result_json: ['{result_json}]'")
+        logger.error(f"    raw_response: ['{raw_response}]'")
+        logger.error(f"    messages_list: ['{messages_list}]'")
         raise
 
 

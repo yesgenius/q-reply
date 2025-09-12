@@ -38,7 +38,7 @@ db/
 
 **Инициализация:**
 ```python
-store = QADatabaseStore(db_path="qa.duckdb", embedding_size=2560)
+store = QADatabaseStore(db_path="storages/qa.duckdb", embedding_size=2560)
 ```
 
 **Основные методы:**
@@ -71,7 +71,7 @@ store = QADatabaseStore(db_path="qa.duckdb", embedding_size=2560)
 Для проверки работоспособности модуля выполните:
 
 ```bash
-python -m db.duckdb_qa_store_test
+python -m storages.duckdb_qa_store_test
 ```
 
 Тестовый скрипт:

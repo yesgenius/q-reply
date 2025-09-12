@@ -225,7 +225,7 @@ python -m gigachat.client
 python -m embeddings.base_embedding
 
 # Тестирование работы с базой данных
-python -m db.duckdb_qa_store_test
+python -m storages.duckdb_qa_store_test
 
 # Тестирование промптов
 python -m prompts.get_category_prompt

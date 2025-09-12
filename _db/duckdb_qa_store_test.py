@@ -11,7 +11,7 @@ The demo avoids unnecessary complexity and keeps assertions explicit and minimal
 It is mypy/pylint-friendly and uses Google-style docstrings for autodocumentation.
 
 Usage:
-    python -m db.duckdb_qa_store_test
+    python -m storages.duckdb_qa_store_test
 
 """
 
@@ -26,7 +26,7 @@ import numpy as np
 # Import the wrapper under test. It must be available on PYTHONPATH.
 # If this file is appended to the same module where QADatabaseStore is defined,
 # the import can be skipped and QADatabaseStore used directly.
-from db.duckdb_qa_store import QADatabaseStore  # type: ignore[import]
+from storages.duckdb_qa_store import QADatabaseStore  # type: ignore[import]
 
 
 # -----------------------------------------------------------------------------

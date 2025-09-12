@@ -62,8 +62,8 @@ llm = GigaChatClient()
 
 # Model parameters optimized for answer generation
 params: dict[str, Any] = {
-    "model": "GigaChat-2-Pro",
-    # "model": "GigaChat",
+    # "model": "GigaChat-2-Pro",
+    "model": "GigaChat",
     # "temperature": 0.3,  # Balanced for informative yet creative answers
     # "top_p": 0.95,
     "stream": False,
@@ -195,10 +195,10 @@ EXECUTE THESE ANSWER GENERATION COMMANDS:
    - 0.3-0.4: Weak answer based on tangential context or general principles
    - 0.0-0.2: Speculative answer with minimal supporting information
 5. **Source Attribution**:
-   Track information origin precisely:
+   MUST track information origin strictly, conservatively, and precisely:
    - Use ["context"] ONLY when answer derives exclusively from Q&A pairs
    - Use ["domain_knowledge"] ONLY when using general expertise without context
-   - Use ["context", "domain_knowledge"] when combining both sources
+   - Use ["context", "domain_knowledge"] when combining both sources in comparable proportions
 
 ENFORCE THESE FIELD CONSTRAINTS:
 - Answer: Complete response string, using \\n for line breaks where needed; language must be Russian
@@ -706,16 +706,16 @@ def run(
 
     try:
         # Make LLM request
-        response = llm.chat_completion(messages=messages_list, **request_params)
+        raw_response = llm.chat_completion(messages=messages_list, **request_params)
 
         # Safely extract content from response
-        if not isinstance(response, dict):
-            raise RuntimeError(f"Expected dict response, got {type(response)}")
+        if not isinstance(raw_response, dict):
+            raise RuntimeError(f"Expected dict response, got {type(raw_response)}")
 
-        if "choices" not in response:
+        if "choices" not in raw_response:
             raise RuntimeError("Response missing 'choices' field")
 
-        choices = response["choices"]
+        choices = raw_response["choices"]
         if not isinstance(choices, list) or len(choices) == 0:
             raise RuntimeError("Response 'choices' is empty or invalid")
 
@@ -737,10 +737,14 @@ def run(
 
         # Return as formatted JSON string with messages and raw response
         result_json = json.dumps(parsed_result, ensure_ascii=False, indent=2)
-        return result_json, messages_list, response
+        return result_json, messages_list, raw_response
 
     except Exception as e:
         logger.error(f"Answer generation failed: {e}")
+        logger.error(f"    message['content']: ['{message['content']}]'")
+        logger.error(f"    result_json: ['{result_json}]'")
+        logger.error(f"    raw_response: ['{raw_response}]'")
+        logger.error(f"    messages_list: ['{messages_list}]'")
         raise
 
 
