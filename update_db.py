@@ -95,6 +95,7 @@ class DatabaseUpdater:
         self.updated_count: int = 0
         self.inserted_count: int = 0
         self.skipped_count: int = 0
+        self.incomplete_count: int = 0  # Track incomplete rows
         self.resume_state: dict = {}
         self.timestamp: str = ""
 
@@ -136,16 +137,17 @@ class DatabaseUpdater:
             return False
 
     def validate_qa_data(self, sheet: Worksheet) -> bool:
-        """Validate QA sheet data completeness.
+        """Validate QA sheet data and report statistics.
 
         Args:
             sheet: The QA worksheet.
 
         Returns:
-            True if all data is complete, False otherwise.
+            Always True (no longer blocks processing).
         """
         empty_rows = 0
         incomplete_rows = []
+        valid_rows = 0
 
         for row_idx in range(START_ROW, sheet.max_row + 1):
             category = sheet.cell(row=row_idx, column=COL_CATEGORY).value
@@ -167,23 +169,32 @@ class DatabaseUpdater:
                         "answer": "Missing" if answer is None else "Present",
                     }
                 )
+            else:
+                valid_rows += 1
+
+        # Report statistics
+        total_rows = sheet.max_row - START_ROW + 1
+        logger.info("Data validation summary:")
+        logger.info(f"  Total rows: {total_rows}")
+        logger.info(f"  Valid rows: {valid_rows}")
+        logger.info(f"  Empty rows: {empty_rows}")
+        logger.info(f"  Incomplete rows: {len(incomplete_rows)}")
 
         if incomplete_rows:
-            logger.error(f"Found {len(incomplete_rows)} incomplete rows:")
+            logger.warning(
+                f"Found {len(incomplete_rows)} incomplete rows that will be skipped:"
+            )
             for row_info in incomplete_rows[:5]:
-                logger.error(
+                logger.warning(
                     f"  Row {row_info['row']}: "
                     f"Category={row_info['category']}, "
                     f"Question={row_info['question']}, "
                     f"Answer={row_info['answer']}"
                 )
             if len(incomplete_rows) > 5:
-                logger.error(f"  ... and {len(incomplete_rows) - 5} more")
-            return False
+                logger.warning(f"  ... and {len(incomplete_rows) - 5} more")
 
-        total_rows = sheet.max_row - START_ROW + 1 - empty_rows
-        logger.info(f"Validated {total_rows} complete QA rows")
-        return True
+        return True  # Always return True to continue processing
 
     def initialize_database(self) -> duckdb_qa_store.QADatabaseStore:
         """Initialize or open the DuckDB database.
@@ -413,7 +424,7 @@ class DatabaseUpdater:
             row_idx: Row index to process.
 
         Returns:
-            True if processing was successful, False otherwise.
+            True if processing was successful or row was skipped, False on critical errors.
         """
         try:
             # Get data from QA sheet
@@ -421,10 +432,37 @@ class DatabaseUpdater:
             question = sheet_qa.cell(row=row_idx, column=COL_QUESTION).value
             answer = sheet_qa.cell(row=row_idx, column=COL_ANSWER).value
 
-            # Convert to strings
-            category = str(category).strip() if category else None
+            # Check for missing required fields
+            missing_fields = []
+            if category is None or (isinstance(category, str) and not category.strip()):
+                missing_fields.append("category")
+            if question is None or (isinstance(question, str) and not question.strip()):
+                missing_fields.append("question")
+            if answer is None or (isinstance(answer, str) and not answer.strip()):
+                missing_fields.append("answer")
+
+            if missing_fields:
+                # Skip row with incomplete data
+                logger.warning(
+                    f"Row {row_idx}: Skipping due to missing fields: {', '.join(missing_fields)}"
+                )
+                self.incomplete_count += 1
+                self.processed_count += 1
+                return True  # Return True to continue processing
+
+            # Convert to strings and strip
+            category = str(category).strip()
             question = str(question).strip()
             answer = str(answer).strip()
+
+            # Validate again after conversion
+            if not question or not answer:
+                logger.warning(
+                    f"Row {row_idx}: Skipping due to empty question or answer after stripping"
+                )
+                self.incomplete_count += 1
+                self.processed_count += 1
+                return True
 
             # Log processing start
             question_preview = question[:80] + "..." if len(question) > 80 else question
@@ -497,7 +535,9 @@ class DatabaseUpdater:
                     success = self.db_store.insert_qa(
                         question=question,
                         answer=answer,
-                        category=category,
+                        category=category
+                        if category
+                        else None,  # Handle empty category
                         question_embedding=question_emb[0],
                         answer_embedding=answer_emb[0],
                     )
@@ -526,7 +566,10 @@ class DatabaseUpdater:
 
         except Exception as e:
             logger.error(f"Error processing row {row_idx}: {e}")
-            return False
+            # For non-critical errors, log and continue
+            logger.warning(f"Row {row_idx}: Skipping due to processing error")
+            self.processed_count += 1
+            return True  # Return True to continue with next row
 
     def delete_obsolete_records(self, sheet: Worksheet) -> int:
         """Delete database records not present in the Excel sheet.
@@ -537,12 +580,12 @@ class DatabaseUpdater:
         Returns:
             Number of deleted records.
         """
-        # Collect all current questions from Excel
+        # Collect all current questions from Excel (only valid ones)
         current_questions = []
 
         for row_idx in range(START_ROW, sheet.max_row + 1):
             question = sheet.cell(row=row_idx, column=COL_QUESTION).value
-            if question:
+            if question and str(question).strip():  # Only add non-empty questions
                 current_questions.append(str(question).strip())
 
         # Delete missing records
@@ -610,11 +653,8 @@ class DatabaseUpdater:
             logger.info("Step 3: Validating QA sheet data...")
             sheet_qa = self.workbook[SHEET_QA]
 
-            if not self.validate_qa_data(sheet_qa):
-                logger.error(
-                    "Data validation failed. Please ensure all columns A, B, C are filled"
-                )
-                return False
+            # Now validation only reports statistics, doesn't block
+            self.validate_qa_data(sheet_qa)
 
             # Step 4: Initialize database
             logger.info("Step 4: Initializing database...")
@@ -638,16 +678,12 @@ class DatabaseUpdater:
             total_rows = sheet_qa.max_row - START_ROW + 1
 
             for row_idx in range(start_from_row, sheet_qa.max_row + 1):
-                # Check if row has data
-                question = sheet_qa.cell(row=row_idx, column=COL_QUESTION).value
-                if not question:
-                    continue
-
-                # Process row
+                # Process row (now handles incomplete data gracefully)
                 success = self.process_row(sheet_qa, sheet_log, row_idx)
 
                 if not success:
-                    logger.error(f"Failed to process row {row_idx}")
+                    # Critical error occurred
+                    logger.error(f"Critical error at row {row_idx}, stopping")
                     # Save progress before stopping
                     try:
                         self.workbook.save(self.output_file)
@@ -688,7 +724,8 @@ class DatabaseUpdater:
             logger.info(f"Total rows processed: {self.processed_count}")
             logger.info(f"  - Inserted: {self.inserted_count}")
             logger.info(f"  - Updated: {self.updated_count}")
-            logger.info(f"  - Skipped: {self.skipped_count}")
+            logger.info(f"  - Skipped (unchanged): {self.skipped_count}")
+            logger.info(f"  - Skipped (incomplete): {self.incomplete_count}")
             logger.info(f"  - Deleted from DB: {deleted_count}")
             logger.info(f"Output file: {self.output_file}")
             if LOG_DB and sheet_log:

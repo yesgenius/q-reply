@@ -273,7 +273,9 @@ class CategoryFiller:
         return categories
 
     def validate_qa_data(self, sheet: Worksheet) -> list[int]:
-        """Validate QA sheet data completeness and identify rows needing processing.
+        """Validate QA sheet data and identify rows needing processing.
+
+        Questions are mandatory, answers are optional.
 
         Args:
             sheet: The QA worksheet.
@@ -282,7 +284,7 @@ class CategoryFiller:
             List of row indices that need category processing.
 
         Raises:
-            ValueError: If questions or answers are missing.
+            ValueError: If questions are missing.
         """
         rows_to_process = []
         total_rows = 0
@@ -298,14 +300,16 @@ class CategoryFiller:
 
             total_rows += 1
 
-            # Validate that both question and answer are present
-            if question is None or answer is None:
+            # Validate that question is present (mandatory)
+            if question is None:
                 raise ValueError(
-                    f"Incomplete QA data at row {row_idx} in QA sheet. "
-                    f"Question (column B): {'Present' if question else 'Missing'}, "
-                    f"Answer (column C): {'Present' if answer else 'Missing'}. "
-                    f"Both columns B and C must be filled."
+                    f"Missing question at row {row_idx} in QA sheet. "
+                    f"Question (column B) is mandatory."
                 )
+
+            # Answer is optional - log if missing
+            if answer is None:
+                logger.debug(f"Row {row_idx}: Answer is empty (optional field)")
 
             # Handle multi-line categories - treat as string and check each line
             if category is not None:
@@ -600,12 +604,17 @@ class CategoryFiller:
 
         last_error = None
 
+        # Determine answer parameter based on configuration and availability
+        answer_param = None
+        if USE_ANSWER_FOR_CATEGORIZATION and answer is not None:
+            answer_param = answer
+
         for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
             try:
-                # Run categorization - returns three values
+                # Run categorization with properly configured answer parameter
                 result_json, messages_list, raw_response = get_category_prompt.run(
                     question,
-                    answer=answer if USE_ANSWER_FOR_CATEGORIZATION and answer else None,
+                    answer=answer_param,
                 )
                 result: dict[str, Any] = json.loads(result_json)
 
@@ -673,16 +682,23 @@ class CategoryFiller:
             )
             logger.info(f"Processing row {row_idx}: {question_preview}")
 
-            # Log if using answer context
-            if USE_ANSWER_FOR_CATEGORIZATION and answer:
+            # Log answer status and usage
+            if answer is None:
+                logger.debug(f"Row {row_idx}: No answer provided (optional field)")
+            elif USE_ANSWER_FOR_CATEGORIZATION:
                 answer_preview = (
                     str(answer)[:50] + "..." if len(str(answer)) > 50 else str(answer)
                 )
                 logger.debug(f"Using answer for categorization: {answer_preview}")
+            else:
+                logger.debug(
+                    "Answer present but not used (USE_ANSWER_FOR_CATEGORIZATION=False)"
+                )
 
             # Categorize the question with retry logic
+            # Pass answer as-is (can be None)
             result = self.categorize_question_with_retry(
-                str(question), str(answer) if answer else None
+                str(question), str(answer) if answer is not None else None
             )
 
             # Update category in QA sheet
@@ -803,7 +819,9 @@ class CategoryFiller:
             logger.info("Categorization system initialized successfully")
 
             if USE_ANSWER_FOR_CATEGORIZATION:
-                logger.info("Note: Answers will be used for enhanced categorization")
+                logger.info(
+                    "Note: Answers will be used for enhanced categorization when available"
+                )
 
             # Step 5: Validate QA data
             logger.info("Step 5: Validating QA sheet data...")
@@ -814,7 +832,7 @@ class CategoryFiller:
             except ValueError as e:
                 logger.error(f"QA data validation failed: {e}")
                 logger.error(
-                    "Please ensure all questions (column B) and answers (column C) are filled"
+                    "Please ensure all rows have questions (column B) filled. Answers (column C) are optional."
                 )
                 return False
 
@@ -850,7 +868,9 @@ class CategoryFiller:
             # Step 6: Process rows
             logger.info("Step 6: Processing rows...")
             if USE_ANSWER_FOR_CATEGORIZATION:
-                logger.info("Note: Using answers for enhanced categorization accuracy")
+                logger.info(
+                    "Note: Using answers for enhanced categorization accuracy when available"
+                )
             logger.info("-" * 70)
 
             successfully_processed: list[int] = []  # Track successfully processed rows
