@@ -17,6 +17,8 @@ Usage:
     python -m embeddings.base_embedding
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -96,9 +98,7 @@ def get_instruction(task_type: str | None = None, **kwargs: Any) -> str:
     return ""
 
 
-def prepare_texts(
-    texts: str | list[str], instruction: str = "", **kwargs: Any
-) -> list[str]:
+def prepare_texts(texts: str | list[str], instruction: str = "", **kwargs: Any) -> list[str]:
     """Prepare texts for embedding with optional instruction prefix.
 
     Args:
@@ -176,19 +176,13 @@ def create_embeddings(
 
     Examples:
         >>> # Document embedding (no instruction)
-        >>> doc_emb, input_texts = create_embeddings(
-        ...     "Product description", task_type="document"
-        ... )
+        >>> doc_emb, input_texts = create_embeddings("Product description", task_type="document")
 
         >>> # Query embedding (with instruction)
-        >>> query_emb, input_texts = create_embeddings(
-        ...     "What is this product?", task_type="query"
-        ... )
+        >>> query_emb, input_texts = create_embeddings("What is this product?", task_type="query")
 
         >>> # Batch processing
-        >>> embs, input_texts = create_embeddings(
-        ...     ["text1", "text2"], task_type="similarity"
-        ... )
+        >>> embs, input_texts = create_embeddings(["text1", "text2"], task_type="similarity")
     """
     # Ensure texts is a list
     if isinstance(texts, str):
@@ -248,18 +242,14 @@ def create_embeddings(
             logger.debug("-" * 60)
 
         # Call GigaChat API
-        response = llm.create_embeddings(
-            input_texts=prepared_texts, model=model, **api_params
-        )
+        response = llm.create_embeddings(input_texts=prepared_texts, model=model, **api_params)
 
         # Validate response structure
         if not isinstance(response, dict):
             raise RuntimeError(f"Unexpected response type: {type(response)}")
 
         if "data" not in response:
-            raise RuntimeError(
-                f"Missing 'data' field in response: {list(response.keys())}"
-            )
+            raise RuntimeError(f"Missing 'data' field in response: {list(response.keys())}")
 
         embeddings_data = response["data"]
 
@@ -273,26 +263,20 @@ def create_embeddings(
         embeddings: list[list[float]] = []
         for i, emb_data in enumerate(embeddings_data):
             if not isinstance(emb_data, dict):
-                raise RuntimeError(
-                    f"Invalid embedding data at index {i}: {type(emb_data)}"
-                )
+                raise RuntimeError(f"Invalid embedding data at index {i}: {type(emb_data)}")
 
             if "embedding" not in emb_data:
                 raise RuntimeError(f"Missing 'embedding' field for text {i}")
 
             embedding = emb_data["embedding"]
             if not isinstance(embedding, list):
-                raise RuntimeError(
-                    f"Invalid embedding type at index {i}: {type(embedding)}"
-                )
+                raise RuntimeError(f"Invalid embedding type at index {i}: {type(embedding)}")
 
             embeddings.append(embedding)
 
         # Log success
         if embeddings:
-            logger.info(
-                f"Created {len(embeddings)} embeddings, dimension: {len(embeddings[0])}"
-            )
+            logger.info(f"Created {len(embeddings)} embeddings, dimension: {len(embeddings[0])}")
 
         return embeddings, prepared_texts
 
@@ -348,9 +332,7 @@ def create_batch_embeddings(
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
         batch_num = i // batch_size + 1
-        logger.debug(
-            f"Processing batch {batch_num}/{total_batches}, size: {len(batch)}"
-        )
+        logger.debug(f"Processing batch {batch_num}/{total_batches}, size: {len(batch)}")
 
         try:
             batch_embeddings, batch_input_texts = create_embeddings(
@@ -360,9 +342,7 @@ def create_batch_embeddings(
             all_input_texts.extend(batch_input_texts)
 
         except Exception as e:
-            logger.error(
-                f"Failed to process batch {batch_num} starting at index {i}: {e}"
-            )
+            logger.error(f"Failed to process batch {batch_num} starting at index {i}: {e}")
             raise RuntimeError(f"Batch processing failed at batch {batch_num}") from e
 
     logger.info(f"Successfully created {len(all_embeddings)} embeddings")
@@ -376,8 +356,8 @@ if __name__ == "__main__":
         format="[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]",
     )
 
-    import sys
     from collections.abc import Callable
+    import sys
 
     print("=== Base Embedding Module Tests ===\n")
 
@@ -420,9 +400,7 @@ if __name__ == "__main__":
         # Check embeddings
         assert isinstance(result, list), f"Expected list, got {type(result)}"
         assert len(result) == 1, f"Expected 1 embedding, got {len(result)}"
-        assert isinstance(result[0], list), (
-            f"Expected list of floats, got {type(result[0])}"
-        )
+        assert isinstance(result[0], list), f"Expected list of floats, got {type(result[0])}"
         assert len(result[0]) > 0, "Embedding vector is empty"
         assert all(isinstance(x, (int, float)) for x in result[0]), (
             "Embedding should contain numbers"
@@ -431,9 +409,7 @@ if __name__ == "__main__":
         # Check input_texts
         assert isinstance(input_texts, list), f"Expected list, got {type(input_texts)}"
         assert len(input_texts) == 1, f"Expected 1 input text, got {len(input_texts)}"
-        assert input_texts[0] == text, (
-            "Input text should match original for document type"
-        )
+        assert input_texts[0] == text, "Input text should match original for document type"
 
     run_test("Single text embedding", test_single_text, skip_on_api_error=True)
 
@@ -458,9 +434,7 @@ if __name__ == "__main__":
 
         # Check input_texts
         assert len(input_texts) == 3, f"Expected 3 input texts, got {len(input_texts)}"
-        assert input_texts == texts, (
-            "Input texts should match originals for document type"
-        )
+        assert input_texts == texts, "Input texts should match originals for document type"
 
     run_test("Multiple texts batch", test_multiple_texts, skip_on_api_error=True)
 
@@ -479,9 +453,7 @@ if __name__ == "__main__":
         )
         assert text in input_texts[0], "Original text should be in input_texts"
 
-    run_test(
-        "Query with instruction", test_query_with_instruction, skip_on_api_error=True
-    )
+    run_test("Query with instruction", test_query_with_instruction, skip_on_api_error=True)
 
     # Test 4: Custom instruction in input_texts
     def test_custom_instruction_in_input() -> None:
@@ -522,12 +494,8 @@ if __name__ == "__main__":
             assert len(emb) == first_dim, f"Embedding {i} has different dimension"
 
         # Check input_texts
-        assert len(batch_input_texts) == 7, (
-            f"Expected 7 input texts, got {len(batch_input_texts)}"
-        )
-        assert batch_input_texts == texts, (
-            "Input texts should match originals for document type"
-        )
+        assert len(batch_input_texts) == 7, f"Expected 7 input texts, got {len(batch_input_texts)}"
+        assert batch_input_texts == texts, "Input texts should match originals for document type"
 
     run_test(
         "Batch embeddings with input",
@@ -552,9 +520,7 @@ if __name__ == "__main__":
             )
             assert texts[i] in input_text, f"Original text {i} should be in input_text"
 
-    run_test(
-        "Batch query instruction", test_batch_query_instruction, skip_on_api_error=True
-    )
+    run_test("Batch query instruction", test_batch_query_instruction, skip_on_api_error=True)
 
     # Test 7: Apply instruction flag effect on input_texts
     def test_apply_instruction_flag_input() -> None:
@@ -591,9 +557,7 @@ if __name__ == "__main__":
             create_embeddings([])
             assert False, "Should have raised ValueError for empty input"
         except ValueError as e:
-            assert "empty" in str(e).lower(), (
-                f"Error message should mention 'empty': {e}"
-            )
+            assert "empty" in str(e).lower(), f"Error message should mention 'empty': {e}"
 
     run_test("Empty input validation", test_empty_input)
 

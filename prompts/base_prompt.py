@@ -32,12 +32,14 @@ Usage:
 
 """
 
-import json
-import logging
+from __future__ import annotations
+
 from collections.abc import (
     Generator,
     Generator as GeneratorType,
 )
+import json
+import logging
 from typing import Any, cast
 
 from gigachat.client import GigaChatClient
@@ -230,9 +232,7 @@ def update_system_prompt(**kwargs: Any) -> str:
         logger.debug("Using cached/pre-initialized system prompt")
 
     # Ensure we always return a string for type consistency
-    assert _system_prompt is not None, (
-        "System prompt should never be None at this point"
-    )
+    assert _system_prompt is not None, "System prompt should never be None at this point"
     return _system_prompt
 
 
@@ -275,9 +275,7 @@ def update_chat_history(**kwargs: Any) -> list[dict[str, str]]:
         _chat_history = _generate_chat_history(**local_kwargs)
         logger.debug(f"Chat history updated with kwargs: {list(local_kwargs.keys())}")
     else:
-        logger.debug(
-            f"Using cached/pre-initialized chat history (length: {len(_chat_history)})"
-        )
+        logger.debug(f"Using cached/pre-initialized chat history (length: {len(_chat_history)})")
 
     return _chat_history.copy()  # Return copy to prevent external modifications
 
@@ -497,9 +495,7 @@ if __name__ == "__main__":
     try:
         print("Test 2: Dynamic system prompt update")
         # Update the system prompt
-        update_system_prompt(
-            role="programming teacher", context="Teaching Python to beginners"
-        )
+        update_system_prompt(role="programming teacher", context="Teaching Python to beginners")
 
         question = "How do functions work?"
         response = run(question)

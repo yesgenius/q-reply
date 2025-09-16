@@ -12,8 +12,8 @@ Design goals:
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
+import re
 from typing import Any, cast
 
 import duckdb
@@ -49,9 +49,7 @@ class QADatabaseStore:
 
     # ----------------------------- Lifecycle --------------------------------
 
-    def __init__(
-        self, db_path: str, embedding_size: int = DEFAULT_EMBEDDING_SIZE
-    ) -> None:
+    def __init__(self, db_path: str, embedding_size: int = DEFAULT_EMBEDDING_SIZE) -> None:
         """Create the store and initialize schema.
 
         Args:
@@ -99,9 +97,7 @@ class QADatabaseStore:
             )
             """
         )
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_category ON qa_records(category)"
-        )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_category ON qa_records(category)")
 
     def _table_exists(self, name: str) -> bool:
         """Check whether a table exists.
@@ -216,9 +212,7 @@ class QADatabaseStore:
             Record dict if found; otherwise None.
         """
         q = self.preprocess_text(question)
-        row = self.conn.execute(
-            "SELECT * FROM qa_records WHERE question = ?", [q]
-        ).fetchone()
+        row = self.conn.execute("SELECT * FROM qa_records WHERE question = ?", [q]).fetchone()
         if row is None:
             return None
         return {
@@ -294,9 +288,7 @@ class QADatabaseStore:
                 logger.error("Insert failed: %s", exc)
             return False
 
-    def update_qa(
-        self, question: str, answer: str, answer_embedding: Sequence[float]
-    ) -> bool:
+    def update_qa(self, question: str, answer: str, answer_embedding: Sequence[float]) -> bool:
         """Update answer and answer embedding for an existing question.
 
         Args:
@@ -431,9 +423,7 @@ class QADatabaseStore:
                     ORDER BY similarity DESC
                     LIMIT ?
                 """
-                rows = self.conn.execute(
-                    sql, [q_emb, cat, float(threshold), int(top_k)]
-                ).fetchall()
+                rows = self.conn.execute(sql, [q_emb, cat, float(threshold), int(top_k)]).fetchall()
             else:
                 sql = f"""
                     WITH scored AS (
@@ -451,9 +441,7 @@ class QADatabaseStore:
                     ORDER BY similarity DESC
                     LIMIT ?
                 """
-                rows = self.conn.execute(
-                    sql, [q_emb, float(threshold), int(top_k)]
-                ).fetchall()
+                rows = self.conn.execute(sql, [q_emb, float(threshold), int(top_k)]).fetchall()
 
             # Optional light deduplication by answer text (keep highest sim).
             best_by_answer: dict[str, tuple[int, str, str, str | None, float]] = {}
@@ -470,9 +458,9 @@ class QADatabaseStore:
                     "category": v[3],
                     "similarity": float(v[4]),
                 }
-                for v in sorted(
-                    best_by_answer.values(), key=lambda t: t[4], reverse=True
-                )[: int(top_k)]
+                for v in sorted(best_by_answer.values(), key=lambda t: t[4], reverse=True)[
+                    : int(top_k)
+                ]
             ]
             return results
         except Exception as exc:  # pragma: no cover

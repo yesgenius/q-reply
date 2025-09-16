@@ -1,0 +1,49 @@
+{
+  "recommendations": [
+    // Python Core Development
+    "ms-python.python",                       // Python language support with IntelliSense, debugging, and formatting
+    "ms-python.vscode-pylance",               // Fast, feature-rich Python language server for type checking and auto-completion
+    "ms-python.debugpy",                      // Python debugger for step-by-step code execution and breakpoints
+    
+    // Code Quality & Type Checking
+    "charliermarsh.ruff",                     // Fast Python linter and formatter replacing flake8, pylint, black, isort
+    "ms-python.mypy-type-checker",            // Static type checker for Python ensuring type safety and catching bugs early
+    
+    // Testing
+    "littlefoxteam.vscode-python-test-adapter", // Run and debug pytest tests with visual test explorer interface
+    
+    // Docker & Containers
+    "ms-azuretools.vscode-docker",            // Build, manage, and deploy containerized applications with Docker
+    "ms-vscode-remote.remote-containers",     // Develop inside Docker containers with full VSCode functionality
+    "ms-vscode-remote.remote-wsl",            // Seamless development in Windows Subsystem for Linux environment
+    
+    // Database
+    "cweijan.vscode-postgresql-client2",      // Connect, query, and manage PostgreSQL databases directly in VSCode
+    
+    // Documentation & Diagrams
+    "yzhang.markdown-all-in-one",             // All-in-one markdown preview, shortcuts, and table of contents generation
+    "jebbs.plantuml",                         // Create UML diagrams from text for architecture and flow documentation
+    "bierner.markdown-mermaid",               // Adds Mermaid diagram and flowchart support to VS Code's builtin Markdown preview
+   
+    // Git Integration
+    "eamodio.gitlens",                        // Visualize code authorship, explore git history, and navigate repositories
+    "mhutchie.git-graph",                     // View git log graph showing branches, commits, and merges visually
+    
+    // Code Formatting & Productivity
+    "christian-kohler.path-intellisense",     // Autocomplete file paths in imports and require statements
+    "usernamehw.errorlens",                   // Display errors and warnings inline with code for immediate visibility
+    "streetsidesoftware.code-spell-checker",  // Catch spelling mistakes in code, comments, and strings
+    
+    // Project Management
+    "gruntfuggly.todo-tree",                  // Find and organize TODO, FIXME, and other comment tags across project
+    "alefragnani.Bookmarks"                   // Mark lines and jump between important code locations quickly
+  ],
+  
+  // Optional extensions for enhanced experience
+  "unwantedRecommendations": [
+    "ms-python.pylint",                       // Replaced by ruff for faster and more comprehensive linting
+    "ms-python.flake8",                       // Replaced by ruff which includes all flake8 rules
+    "ms-python.black-formatter",              // Replaced by ruff formatter with equivalent functionality
+    "ms-python.isort"                         // Replaced by ruff which handles import sorting
+  ]
+}

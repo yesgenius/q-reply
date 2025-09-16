@@ -33,9 +33,7 @@ Example:
 
     # Generate answer using context
     question = "How do you monitor model performance?"
-    result, messages, response = get_answer_prompt.run(
-        user_question=question, qa_pairs=qa_pairs
-    )
+    result, messages, response = get_answer_prompt.run(user_question=question, qa_pairs=qa_pairs)
     print(result)  # {"answer": "Based on context, monitoring can include..."}
     print(response)  # Raw LLM response for debugging
     ```
@@ -44,14 +42,15 @@ Usage:
     python -m prompts.get_answer_prompt
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import re
 from typing import Any
 
-import json_repair
-
 from gigachat.client import GigaChatClient
+import json_repair
 from utils.logger import get_logger
 
 
@@ -95,9 +94,7 @@ def _format_user_prompt(question: str, qa_pairs: list[dict[str, str]]) -> str:
         ValueError: If qa_pairs is empty or invalid format.
 
     Example:
-        >>> qa_pairs = [
-        ...     {"question": "What is Docker?", "answer": "Container platform..."}
-        ... ]
+        >>> qa_pairs = [{"question": "What is Docker?", "answer": "Container platform..."}]
         >>> prompt = _format_user_prompt("How to scale?", qa_pairs)
     """
     if not qa_pairs:
@@ -319,9 +316,7 @@ def update_chat_history(**kwargs: Any) -> list[dict[str, str]]:
     return _chat_history.copy()
 
 
-def get_messages(
-    user_question: str, qa_pairs: list[dict[str, str]]
-) -> list[dict[str, str]]:
+def get_messages(user_question: str, qa_pairs: list[dict[str, str]]) -> list[dict[str, str]]:
     """Build complete message list for LLM request.
 
     Args:
@@ -427,8 +422,7 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
         confidence_float = float(confidence)
         if not 0 <= confidence_float <= 1:
             raise ValueError(
-                f"json_repair returned 'confidence'={confidence_float} "
-                f"outside valid range [0, 1]"
+                f"json_repair returned 'confidence'={confidence_float} outside valid range [0, 1]"
             )
         result["confidence"] = confidence_float
 
@@ -445,8 +439,7 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
         # Check array constraints from schema
         if not sources:
             raise ValueError(
-                "json_repair returned empty 'sources_used' list "
-                "(schema requires minItems: 1)"
+                "json_repair returned empty 'sources_used' list (schema requires minItems: 1)"
             )
         if len(sources) > 2:
             raise ValueError(
@@ -502,9 +495,7 @@ def _extract_fields_fallback(response_text: str) -> dict[str, Any]:
     Raises:
         ValueError: If answer cannot be extracted.
     """
-    logger.warning(
-        f"Invalid JSON, using fallback extraction for response: [{response_text}]"
-    )
+    logger.warning(f"Invalid JSON, using fallback extraction for response: [{response_text}]")
 
     result: dict[str, Any] = {}
 
@@ -665,9 +656,7 @@ def run(
         RuntimeError: If LLM response format is unexpected or streaming is requested.
 
     Example:
-        >>> qa_pairs = [
-        ...     {"question": "How to scale?", "answer": "Use load balancers..."}
-        ... ]
+        >>> qa_pairs = [{"question": "How to scale?", "answer": "Use load balancers..."}]
         >>> result, messages, response = run("What about caching?", qa_pairs)
         >>> print(result)
         '{"answer": "Based on scaling context, caching can help...", "confidence": 0.9}'
@@ -939,9 +928,7 @@ if __name__ == "__main__":
         print("\n3. Test with streaming (should fail):")
         try:
             valid_qa = [{"question": "Q", "answer": "A"}]
-            result, messages, response = run(
-                "Test", valid_qa, custom_params={"stream": True}
-            )
+            result, messages, response = run("Test", valid_qa, custom_params={"stream": True})
             print("✗ Should have raised RuntimeError")
         except RuntimeError as e:
             print(f"✓ Correctly raised RuntimeError: {str(e)[:50]}...")
@@ -973,9 +960,7 @@ if __name__ == "__main__":
         result_json, messages, raw_response = run(question, test_qa)
 
         print("\n--- RETURN VALUES ---")
-        print(
-            f"1. result_json: type={type(result_json)}, length={len(result_json)} chars"
-        )
+        print(f"1. result_json: type={type(result_json)}, length={len(result_json)} chars")
         print(f"2. messages: type={type(messages)}, length={len(messages)} items")
         print(
             f"3. raw_response: type={type(raw_response)}, has_keys={raw_response is not None and isinstance(raw_response, dict)}"

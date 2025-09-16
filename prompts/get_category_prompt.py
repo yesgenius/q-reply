@@ -34,14 +34,15 @@ Usage:
     python -m prompts.get_category_prompt
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import re
 from typing import Any
 
-import json_repair
-
 from gigachat.client import GigaChatClient
+import json_repair
 from utils.logger import get_logger
 
 
@@ -65,9 +66,7 @@ params: dict[str, Any] = {
 # Global cached variables
 _system_prompt: str | None = None
 _chat_history: list[dict[str, str]] = []
-_current_categories: dict[str, str] | None = (
-    None  # Cache current categories for validation
-)
+_current_categories: dict[str, str] | None = None  # Cache current categories for validation
 
 
 def _format_user_prompt(question: str, answer: str | None = None) -> str:
@@ -189,9 +188,7 @@ EXECUTE THESE CATEGORIZATION COMMANDS:
 3. **Reasoning**: Provide a brief explanation (no more than two sentences) of why this particular category was chosen
 
 ENFORCE THESE FIELD CONSTRAINTS:
-- CategoryName must be exactly one of: {
-        ", ".join([f'"{item}"' for item in categories_list])
-    }
+- CategoryName must be exactly one of: {", ".join([f'"{item}"' for item in categories_list])}
 - Confidence must be a float between 0.00 and 1.00 with exactly two decimals.
 - Reasoning must not exceed two sentences; must be one line; Russian.
 
@@ -447,8 +444,7 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
         confidence_float = float(confidence)
         if not 0 <= confidence_float <= 1:
             raise ValueError(
-                f"json_repair returned 'confidence'={confidence_float} "
-                f"outside valid range [0, 1]"
+                f"json_repair returned 'confidence'={confidence_float} outside valid range [0, 1]"
             )
         result["confidence"] = confidence_float
 
@@ -460,9 +456,7 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
                 f"instead of str: {repr(reasoning)[:100]}"
             )
         if not reasoning.strip():
-            raise ValueError(
-                f"json_repair returned empty 'reasoning' field: {reasoning!r}"
-            )
+            raise ValueError(f"json_repair returned empty 'reasoning' field: {reasoning!r}")
         result["reasoning"] = reasoning
 
         logger.debug(
@@ -497,9 +491,7 @@ def _extract_fields_fallback(response_text: str) -> dict[str, Any]:
     Raises:
         ValueError: If category cannot be extracted.
     """
-    logger.warning(
-        f"Invalid JSON, using fallback extraction for response: [{response_text}]"
-    )
+    logger.warning(f"Invalid JSON, using fallback extraction for response: [{response_text}]")
 
     result: dict[str, Any] = {}
 
@@ -741,9 +733,7 @@ if __name__ == "__main__":
         format="[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]",
     )
 
-    print(
-        "=== Question Categorization Module Test (with Answer Context and Raw Response) ===\n"
-    )
+    print("=== Question Categorization Module Test (with Answer Context and Raw Response) ===\n")
 
     # Test 1: Initialize categorization system
     try:
@@ -825,9 +815,7 @@ if __name__ == "__main__":
 
             try:
                 # Just pass the answer - it will be automatically used
-                result_json, messages, raw_response = run(
-                    qa["question"], answer=qa["answer"]
-                )
+                result_json, messages, raw_response = run(qa["question"], answer=qa["answer"])
                 result = json.loads(result_json)
 
                 print(f"✓ Category: {result['category']}")
@@ -855,9 +843,7 @@ if __name__ == "__main__":
 
     # Test 4: Verify answer is optional and raw response is always returned
     try:
-        print(
-            "Test 4: Verify answer parameter is optional and raw response always present"
-        )
+        print("Test 4: Verify answer parameter is optional and raw response always present")
 
         question = "How to optimize database queries?"
         answer = "Use indexes, query optimization, and caching strategies."

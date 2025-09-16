@@ -15,12 +15,14 @@ Configuration:
    Adjust settings at the beginning of the script for IDE execution.
 """
 
+from __future__ import annotations
+
+from datetime import datetime
 import json
 import logging
+from pathlib import Path
 import shutil
 import sys
-from datetime import datetime
-from pathlib import Path
 
 import openpyxl
 from openpyxl import Workbook
@@ -181,9 +183,7 @@ class DatabaseUpdater:
         logger.info(f"  Incomplete rows: {len(incomplete_rows)}")
 
         if incomplete_rows:
-            logger.warning(
-                f"Found {len(incomplete_rows)} incomplete rows that will be skipped:"
-            )
+            logger.warning(f"Found {len(incomplete_rows)} incomplete rows that will be skipped:")
             for row_info in incomplete_rows[:5]:
                 logger.warning(
                     f"  Row {row_info['row']}: "
@@ -413,9 +413,7 @@ class DatabaseUpdater:
             except Exception as e:
                 logger.warning(f"Could not clear resume state: {e}")
 
-    def process_row(
-        self, sheet_qa: Worksheet, sheet_log: Worksheet | None, row_idx: int
-    ) -> bool:
+    def process_row(self, sheet_qa: Worksheet, sheet_log: Worksheet | None, row_idx: int) -> bool:
         """Process a single row from QA sheet.
 
         Args:
@@ -478,9 +476,7 @@ class DatabaseUpdater:
             if existing_record:
                 # Question exists - check if answer needs update
                 if existing_record["answer"] == answer:
-                    logger.info(
-                        f"Row {row_idx}: Question exists with same answer, skipping"
-                    )
+                    logger.info(f"Row {row_idx}: Question exists with same answer, skipping")
                     self.skipped_count += 1
                     input_text_q = ""
                     input_text_a = ""
@@ -488,9 +484,7 @@ class DatabaseUpdater:
                     logger.info(f"Row {row_idx}: Updating answer for existing question")
 
                     # Generate new answer embedding
-                    logger.info(
-                        f"Row {row_idx}: Generating new ANSWER embedding for update..."
-                    )
+                    logger.info(f"Row {row_idx}: Generating new ANSWER embedding for update...")
                     answer_emb, answer_inputs = base_embedding.create_embeddings(
                         answer, task_type="document"
                     )
@@ -535,9 +529,7 @@ class DatabaseUpdater:
                     success = self.db_store.insert_qa(
                         question=question,
                         answer=answer,
-                        category=category
-                        if category
-                        else None,  # Handle empty category
+                        category=category if category else None,  # Handle empty category
                         question_embedding=question_emb[0],
                         answer_embedding=answer_emb[0],
                     )
@@ -666,9 +658,7 @@ class DatabaseUpdater:
                 if SHEET_LOG_PREFIX in self.workbook.sheetnames:
                     sheet_log = self.workbook[SHEET_LOG_PREFIX]
                 else:
-                    logger.warning(
-                        f"LOG_DB is enabled but '{SHEET_LOG_PREFIX}' sheet not found"
-                    )
+                    logger.warning(f"LOG_DB is enabled but '{SHEET_LOG_PREFIX}' sheet not found")
 
             # Step 5: Process rows
             logger.info("Step 5: Synchronizing data with database...")
@@ -688,9 +678,7 @@ class DatabaseUpdater:
                     try:
                         self.workbook.save(self.output_file)
                         self.save_resume_state(self.output_file, row_idx - 1)
-                        logger.info(
-                            f"Progress saved. You can resume from row {row_idx}"
-                        )
+                        logger.info(f"Progress saved. You can resume from row {row_idx}")
                     except Exception as save_error:
                         logger.error(f"Could not save progress: {save_error}")
                     return False
@@ -701,9 +689,7 @@ class DatabaseUpdater:
                         self.workbook.save(self.output_file)
                         self.save_resume_state(self.output_file, row_idx)
                         progress = row_idx - START_ROW + 1
-                        logger.info(
-                            f"Progress saved: {progress}/{total_rows} rows processed"
-                        )
+                        logger.info(f"Progress saved: {progress}/{total_rows} rows processed")
                     except Exception as save_error:
                         logger.error(f"Could not save progress: {save_error}")
 

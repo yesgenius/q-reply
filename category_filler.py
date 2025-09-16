@@ -16,11 +16,13 @@ Configuration:
     Adjust settings at the beginning of the script for IDE execution.
 """
 
+from __future__ import annotations
+
+from datetime import datetime
 import json
+from pathlib import Path
 import shutil
 import sys
-from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import openpyxl
@@ -53,9 +55,7 @@ COL_QA_QUESTION = 2  # Column B in QA sheet
 COL_QA_ANSWER = 3  # Column C in QA sheet
 
 # Categorization configuration
-USE_ANSWER_FOR_CATEGORIZATION = (
-    True  # Include answer in categorization for better accuracy
-)
+USE_ANSWER_FOR_CATEGORIZATION = True  # Include answer in categorization for better accuracy
 MAX_RETRY_ATTEMPTS = 5  # Maximum number of retry attempts on error
 RETRY_DELAY = 2  # Delay between retries in seconds (if needed)
 
@@ -88,9 +88,7 @@ try:
     from prompts import get_category_prompt
 except ImportError as e:
     logger.error(f"Could not import get_category_prompt module: {e}")
-    logger.error(
-        "Ensure the module is in the correct path: prompts/get_category_prompt.py"
-    )
+    logger.error("Ensure the module is in the correct path: prompts/get_category_prompt.py")
     sys.exit(1)
 
 
@@ -168,11 +166,7 @@ class CategoryFiller:
                 raw_response = json.loads(raw_response)
 
             # Navigate: choices[0].message.content
-            content = (
-                raw_response.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
+            content = raw_response.get("choices", [{}])[0].get("message", {}).get("content", "")
             # Ensure string return type
             return str(content) if content is not None else ""
         except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError):
@@ -222,9 +216,7 @@ class CategoryFiller:
 
         except PermissionError:
             logger.error(f"File is locked: {INPUT_FILE}")
-            logger.error(
-                "Please close the file in Excel or other programs and try again."
-            )
+            logger.error("Please close the file in Excel or other programs and try again.")
             return False
         except Exception as e:
             logger.error(f"Error reading input file: {e}")
@@ -265,9 +257,7 @@ class CategoryFiller:
             categories[str(category_name).strip()] = str(category_desc).strip()
 
         if not categories:
-            raise ValueError(
-                "No categories found in CATEGORY sheet. Please fill columns A and B."
-            )
+            raise ValueError("No categories found in CATEGORY sheet. Please fill columns A and B.")
 
         logger.info(f"Loaded {len(categories)} categories from CATEGORY sheet")
         return categories
@@ -318,9 +308,7 @@ class CategoryFiller:
                 if "\n" in category_str:
                     # Split and check if ALL lines are valid categories
                     category_lines = [
-                        line.strip()
-                        for line in category_str.split("\n")
-                        if line.strip()
+                        line.strip() for line in category_str.split("\n") if line.strip()
                     ]
                     all_valid = all(cat in self.categories for cat in category_lines)
                     if not all_valid:
@@ -439,9 +427,7 @@ class CategoryFiller:
             for param_name, param_value in model_params.items():
                 params_sheet.cell(row=row, column=1, value=param_name)
                 params_sheet.cell(row=row, column=2, value=str(param_value))
-                params_sheet.cell(
-                    row=row, column=3, value=param_descriptions.get(param_name, "")
-                )
+                params_sheet.cell(row=row, column=3, value=param_descriptions.get(param_name, ""))
                 row += 1
 
         # Auto-adjust column widths
@@ -492,9 +478,7 @@ class CategoryFiller:
         if LOG_CATEGORY:
             # Remove existing LOG_CATEGORY sheet if it exists
             if log_sheet_name in wb.sheetnames:
-                logger.info(
-                    f"Removing existing '{log_sheet_name}' sheet for fresh start"
-                )
+                logger.info(f"Removing existing '{log_sheet_name}' sheet for fresh start")
                 wb.remove(wb[log_sheet_name])
 
             # Create new LOG_CATEGORY sheet
@@ -632,9 +616,7 @@ class CategoryFiller:
 
             except Exception as e:
                 last_error = e
-                logger.warning(
-                    f"Categorization attempt {attempt}/{MAX_RETRY_ATTEMPTS} failed: {e}"
-                )
+                logger.warning(f"Categorization attempt {attempt}/{MAX_RETRY_ATTEMPTS} failed: {e}")
 
                 if attempt < MAX_RETRY_ATTEMPTS:
                     # Add delay between retries if configured
@@ -653,9 +635,7 @@ class CategoryFiller:
             "response_content": "",
         }
 
-    def process_row(
-        self, sheet_qa: Worksheet, sheet_log: Worksheet | None, row_idx: int
-    ) -> bool:
+    def process_row(self, sheet_qa: Worksheet, sheet_log: Worksheet | None, row_idx: int) -> bool:
         """Process a single row from QA sheet.
 
         Args:
@@ -686,14 +666,10 @@ class CategoryFiller:
             if answer is None:
                 logger.debug(f"Row {row_idx}: No answer provided (optional field)")
             elif USE_ANSWER_FOR_CATEGORIZATION:
-                answer_preview = (
-                    str(answer)[:50] + "..." if len(str(answer)) > 50 else str(answer)
-                )
+                answer_preview = str(answer)[:50] + "..." if len(str(answer)) > 50 else str(answer)
                 logger.debug(f"Using answer for categorization: {answer_preview}")
             else:
-                logger.debug(
-                    "Answer present but not used (USE_ANSWER_FOR_CATEGORIZATION=False)"
-                )
+                logger.debug("Answer present but not used (USE_ANSWER_FOR_CATEGORIZATION=False)")
 
             # Categorize the question with retry logic
             # Pass answer as-is (can be None)
@@ -714,9 +690,7 @@ class CategoryFiller:
                 sheet_log.cell(row=row_idx, column=5, value=result.get("reasoning", ""))
                 sheet_log.cell(row=row_idx, column=6, value=result.get("messages", ""))
                 sheet_log.cell(row=row_idx, column=7, value=result.get("response", ""))
-                sheet_log.cell(
-                    row=row_idx, column=8, value=result.get("response_content", "")
-                )
+                sheet_log.cell(row=row_idx, column=8, value=result.get("response_content", ""))
 
             # Log result
             logger.info(
@@ -819,9 +793,7 @@ class CategoryFiller:
             logger.info("Categorization system initialized successfully")
 
             if USE_ANSWER_FOR_CATEGORIZATION:
-                logger.info(
-                    "Note: Answers will be used for enhanced categorization when available"
-                )
+                logger.info("Note: Answers will be used for enhanced categorization when available")
 
             # Step 5: Validate QA data
             logger.info("Step 5: Validating QA sheet data...")
@@ -845,15 +817,11 @@ class CategoryFiller:
                 )
 
             if not rows_to_process:
-                logger.info(
-                    "No rows need processing. All categories are already filled correctly."
-                )
+                logger.info("No rows need processing. All categories are already filled correctly.")
                 self.clear_resume_state()
                 return True
 
-            logger.info(
-                f"Found {len(rows_to_process)} rows that need category assignment"
-            )
+            logger.info(f"Found {len(rows_to_process)} rows that need category assignment")
 
             # Get LOG_CATEGORY sheet if enabled
             sheet_log = None
@@ -892,9 +860,7 @@ class CategoryFiller:
                                 f"Emergency save after error: saved up to row {last_successful}"
                             )
                         except Exception as save_error:
-                            logger.error(
-                                f"Could not perform emergency save: {save_error}"
-                            )
+                            logger.error(f"Could not perform emergency save: {save_error}")
 
                     continue  # Skip to next row
 

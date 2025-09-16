@@ -175,9 +175,7 @@ def main() -> None:
     )
     assert ok, "Update must succeed"
     refetched = db.find_question(test_qa_pairs[0]["question"])
-    assert refetched is not None and refetched["answer"] == new_answer, (
-        "Update not visible"
-    )
+    assert refetched is not None and refetched["answer"] == new_answer, "Update not visible"
 
     # 5) Update category
     logger.info("5) Update category")
@@ -227,19 +225,11 @@ def main() -> None:
 
         # Test 6.1: Validate threshold impact
         logger.info(" 6.1) Testing threshold impact on result count")
-        query_emb = generate_fake_embedding(
-            "возраст для получения кредитной карты", emb_size
-        )
+        query_emb = generate_fake_embedding("возраст для получения кредитной карты", emb_size)
 
-        results_high_threshold = db.search_similar_questions(
-            query_emb, top_k=20, threshold=0.8
-        )
-        results_mid_threshold = db.search_similar_questions(
-            query_emb, top_k=20, threshold=0.3
-        )
-        results_low_threshold = db.search_similar_questions(
-            query_emb, top_k=20, threshold=0.0
-        )
+        results_high_threshold = db.search_similar_questions(query_emb, top_k=20, threshold=0.8)
+        results_mid_threshold = db.search_similar_questions(query_emb, top_k=20, threshold=0.3)
+        results_low_threshold = db.search_similar_questions(query_emb, top_k=20, threshold=0.0)
 
         # Higher threshold should return fewer or equal results
         assert len(results_high_threshold) <= len(results_mid_threshold), (
@@ -279,12 +269,8 @@ def main() -> None:
 
         # Results should increase or stay same as k increases
         assert len(results_k1) <= len(results_k3), "k=1 should have <= results than k=3"
-        assert len(results_k3) <= len(results_k10), (
-            "k=3 should have <= results than k=10"
-        )
-        assert len(results_k10) <= len(results_k50), (
-            "k=10 should have <= results than k=50"
-        )
+        assert len(results_k3) <= len(results_k10), "k=3 should have <= results than k=10"
+        assert len(results_k10) <= len(results_k50), "k=10 should have <= results than k=50"
 
         logger.info("  - top_k=1: %d results", len(results_k1))
         logger.info("  - top_k=3: %d results", len(results_k3))
@@ -295,9 +281,7 @@ def main() -> None:
         logger.info(" 6.3) Testing category filter impact on result count")
 
         # Search without category filter
-        results_no_filter = db.search_similar_questions(
-            query_emb, top_k=20, threshold=0.0
-        )
+        results_no_filter = db.search_similar_questions(query_emb, top_k=20, threshold=0.0)
 
         # Search with specific category filters
         results_age_cat = db.search_similar_questions(
@@ -324,14 +308,10 @@ def main() -> None:
                 f"Result has wrong category: {r['category']}"
             )
         for r in results_terms_cat:
-            assert r["category"] == "Условия карты", (
-                f"Result has wrong category: {r['category']}"
-            )
+            assert r["category"] == "Условия карты", f"Result has wrong category: {r['category']}"
 
         logger.info("  - No filter: %d results", len(results_no_filter))
-        logger.info(
-            "  - Category 'Возрастные ограничения': %d results", len(results_age_cat)
-        )
+        logger.info("  - Category 'Возрастные ограничения': %d results", len(results_age_cat))
         logger.info("  - Category 'Условия карты': %d results", len(results_terms_cat))
         logger.info("  - Category 'Документы': %d results", len(results_docs_cat))
 
@@ -350,9 +330,7 @@ def main() -> None:
         logger.info(" 6.5) Testing edge cases")
 
         # Very high threshold should return few/no results
-        results_impossible = db.search_similar_questions(
-            query_emb, top_k=10, threshold=0.99
-        )
+        results_impossible = db.search_similar_questions(query_emb, top_k=10, threshold=0.99)
         logger.info(
             "  - Threshold 0.99: %d results (expected 0 or very few)",
             len(results_impossible),
@@ -362,9 +340,7 @@ def main() -> None:
         results_no_cat = db.search_similar_questions(
             query_emb, category="NonExistentCategory", top_k=10, threshold=0.0
         )
-        assert len(results_no_cat) == 0, (
-            "Non-existent category should return no results"
-        )
+        assert len(results_no_cat) == 0, "Non-existent category should return no results"
         logger.info("  - Non-existent category: 0 results (as expected)")
 
     else:
@@ -390,9 +366,7 @@ def main() -> None:
         "Да, пополнение без комиссии через банкоматы банка",
         None,
         generate_fake_embedding("Можно ли пополнить карту без комиссии?", emb_size),
-        generate_fake_embedding(
-            "Да, пополнение без комиссии через банкоматы банка", emb_size
-        ),
+        generate_fake_embedding("Да, пополнение без комиссии через банкоматы банка", emb_size),
     )
     assert ok, "Insert without category must succeed"
     logger.info(" - Inserted row without category")

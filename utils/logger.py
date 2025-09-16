@@ -15,9 +15,11 @@ Typical usage example:
     logger.info("Application started")
 """
 
+from __future__ import annotations
+
 import logging
-import sys
 from pathlib import Path
+import sys
 from typing import Optional
 
 
@@ -30,9 +32,7 @@ __all__ = [
 ]
 
 # Default configuration
-DEFAULT_FORMAT = (
-    "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
-)
+DEFAULT_FORMAT = "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
 DEFAULT_LEVEL = logging.INFO
 
 
@@ -48,11 +48,11 @@ class LoggerSetup:
         _file_handler: Current file handler for potential updates.
     """
 
-    _instance: Optional["LoggerSetup"] = None
+    _instance: LoggerSetup | None = None
     _initialized: bool = False
     _file_handler: logging.FileHandler | None = None
 
-    def __new__(cls) -> "LoggerSetup":
+    def __new__(cls) -> LoggerSetup:
         """Ensure singleton pattern."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -118,9 +118,7 @@ class LoggerSetup:
         else:
             logger.info("Logging initialized (console only)")
 
-    def _add_file_handler(
-        self, log_file: Path, level: int, formatter: logging.Formatter
-    ) -> None:
+    def _add_file_handler(self, log_file: Path, level: int, formatter: logging.Formatter) -> None:
         """Add or replace file handler.
 
         Args:
@@ -157,9 +155,7 @@ class LoggerSetup:
             logger.error(f"Cannot create log file: {e}")
             raise
 
-    def _update_file_handler(
-        self, log_file: Path, level: int, format_string: str
-    ) -> None:
+    def _update_file_handler(self, log_file: Path, level: int, format_string: str) -> None:
         """Update file handler for resumed sessions.
 
         Args:

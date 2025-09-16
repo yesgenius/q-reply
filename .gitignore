@@ -19,7 +19,6 @@ ENV/
 # --- Environment variables & secrets ---
 .env
 .env.*
-!.env.example
 
 # --- SQLAlchemy / Alembic ---
 alembic.ini
@@ -79,6 +78,10 @@ qa.duckdb
 *.xlsm
 *.xlsb
 
-# But keep these specific files
-!Q.origin.xlsx
-!QA.origin.xlsx
+# Keep these specific files
+# Allow any file or folder with "example" in its name at any level
+!*example*
+
+# Allow the .vscode folder and all of its contents at any level
+!.vscode/
+!.vscode/**

@@ -39,18 +39,19 @@ Models list in contur:
 
 """
 
+from __future__ import annotations
+
+from collections.abc import Generator
+from datetime import UTC, datetime
 import json
 import logging
 import time
-import uuid
-from collections.abc import Generator
-from datetime import UTC, datetime
 from typing import Any
+import uuid
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
 from utils.logger import get_logger
 
 from .config import GigaChatConfig
@@ -199,9 +200,7 @@ class GigaChatClient:
             logger.debug(f"Failed to parse expires_in: {e}")
 
         # Default to 30 minutes if no expiration info
-        logger.warning(
-            "No valid expiration info in token response, defaulting to 30 minutes"
-        )
+        logger.warning("No valid expiration info in token response, defaulting to 30 minutes")
         return int(time.time()) + 1800
 
     def _get_auth_headers(self) -> dict[str, str]:
@@ -264,9 +263,7 @@ class GigaChatClient:
             return self.access_token
 
         if not self.config.auth_basic:
-            raise ValueError(
-                "Basic authentication is enabled but auth_basic is not set"
-            )
+            raise ValueError("Basic authentication is enabled but auth_basic is not set")
 
         logger.info("Requesting new access token using basic authentication")
         logger.debug(f"OAuth URL: {self.config.oauth_url}")
@@ -510,9 +507,7 @@ class GigaChatClient:
                                 if line.startswith("data: "):
                                     data_str = line[6:]  # Remove 'data: ' prefix
                                     if data_str == "[DONE]":
-                                        logger.debug(
-                                            f"Stream completed after {chunk_count} chunks"
-                                        )
+                                        logger.debug(f"Stream completed after {chunk_count} chunks")
                                         break
                                     try:
                                         chunk = json.loads(data_str)
@@ -581,10 +576,7 @@ class GigaChatClient:
         elif not input_texts:
             raise ValueError("Input texts cannot be empty")
 
-        logger.debug(
-            f"create_embeddings called with model={model}, "
-            f"input_count={len(input_texts)}"
-        )
+        logger.debug(f"create_embeddings called with model={model}, input_count={len(input_texts)}")
 
         if model not in ["Embeddings", "EmbeddingsGigaR"]:
             raise ValueError(f"Invalid embeddings model: {model}")
@@ -633,16 +625,14 @@ class GigaChatClient:
         logger.debug("Closing GigaChatClient session")
         self.session.close()
 
-    def __enter__(self) -> "GigaChatClient":
+    def __enter__(self) -> GigaChatClient:
         """Context manager entry."""
         logger.debug("Entering GigaChatClient context")
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager exit."""
-        logger.debug(
-            f"Exiting GigaChatClient context - exc_type: {exc_type}, exc_val: {exc_val}"
-        )
+        logger.debug(f"Exiting GigaChatClient context - exc_type: {exc_type}, exc_val: {exc_val}")
         self.close()
 
 
@@ -695,9 +685,7 @@ if __name__ == "__main__":
         ]
 
         session_id = str(uuid.uuid4())
-        response = client.chat_completion(
-            messages, model="GigaChat", x_session_id=session_id
-        )
+        response = client.chat_completion(messages, model="GigaChat", x_session_id=session_id)
         # Type guard for non-streaming response
         if isinstance(response, dict) and response.get("choices"):
             content = response["choices"][0]["message"]["content"]
@@ -711,13 +699,9 @@ if __name__ == "__main__":
 
         try:
             request_id = str(uuid.uuid4())
-            embeddings_response = client.create_embeddings(
-                texts, x_request_id=request_id
-            )
+            embeddings_response = client.create_embeddings(texts, x_request_id=request_id)
             embeddings_data = embeddings_response.get("data", [])
-            logger.info(
-                f"Created {len(embeddings_data)} embeddings (request_id: {request_id})"
-            )
+            logger.info(f"Created {len(embeddings_data)} embeddings (request_id: {request_id})")
             for i, emb in enumerate(embeddings_data):
                 emb_vector = emb.get("embedding", [])
                 logger.info(f"  - Text {i}: embedding size = {len(emb_vector)}")

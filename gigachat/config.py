@@ -8,6 +8,8 @@ Usage:
 
 """
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
@@ -171,8 +173,7 @@ class GigaChatConfig:
         valid_scopes = {"GIGACHAT_API_PERS", "GIGACHAT_API_B2B", "GIGACHAT_API_CORP"}
         if self.scope not in valid_scopes:
             raise ValueError(
-                f"Invalid scope: {self.scope}. "
-                f"Must be one of: {', '.join(sorted(valid_scopes))}"
+                f"Invalid scope: {self.scope}. Must be one of: {', '.join(sorted(valid_scopes))}"
             )
 
     def is_basic_auth(self) -> bool:
@@ -256,17 +257,13 @@ if __name__ == "__main__":
             if key.startswith("GIGACHAT_"):
                 # Mask sensitive values
                 if "AUTH" in key or "KEY" in key or "CERT" in key:
-                    masked = (
-                        value[:5] + "..." + value[-5:] if len(value) > 10 else "***"
-                    )
+                    masked = value[:5] + "..." + value[-5:] if len(value) > 10 else "***"
                     print(f"  {key}={masked}")
                 else:
                     print(f"  {key}={value}")
 
         print("\nConfiguration loaded successfully!")
-        print(
-            f"Authentication method: {'Basic' if config.is_basic_auth() else 'Certificate'}"
-        )
+        print(f"Authentication method: {'Basic' if config.is_basic_auth() else 'Certificate'}")
         print(f"Scope: {config.scope}")
         print(f"OAuth URL: {config.oauth_url}")
         print(f"Request timeout: {config.request_timeout}s")

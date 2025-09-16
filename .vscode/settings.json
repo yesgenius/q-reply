@@ -1,0 +1,92 @@
+{
+  // ──────────────────────────── Python Interpreter ────────────────────────────
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.terminal.activateEnvInCurrentTerminal": true,
+  
+  // ──────────────────────────── Ruff Extension ─────────────────────────────
+  "ruff.enable": true,
+  "ruff.lint.enable": true,
+  "ruff.format.enable": true,
+  "ruff.organizeImports": true,
+  "ruff.nativeServer": true,
+  
+  // ──────────────────────────── Mypy Extension ─────────────────────────────
+  "mypy-type-checker.enabled": true,
+  "mypy-type-checker.reportingScope": "workspace",
+  "mypy-type-checker.preferDaemon": true,
+  
+  // ──────────────────────────── Pylance Settings ───────────────────────────
+  "python.analysis.typeCheckingMode": "off",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.completeFunctionParens": true,
+  
+  // ──────────────────────────── Editor Behavior ────────────────────────────
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.ruff": "explicit",
+    "source.organizeImports.ruff": "explicit"
+  },
+  "editor.rulers": [100],
+  
+  // ──────────────────────────── Testing ────────────────────────────────────
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  
+  // ──────────────────────────── File Management ────────────────────────────
+  "files.autoSave": "onFocusChange",
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.associations": {
+    "*.toml": "toml",
+    "*.yml": "yaml",
+    "*.yaml": "yaml",
+    ".env*": "dotenv"
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    ".mypy_cache": true,
+    ".ruff_cache": true,
+    ".pytest_cache": true,
+    ".coverage": true,
+    "htmlcov": true,
+    "*.egg-info": true
+  },
+  
+  // ──────────────────────────── Terminal Environment ───────────────────────
+  "terminal.integrated.env.linux": {
+    "PYTHONPATH": "${workspaceFolder}/src",
+    "POETRY_VIRTUALENVS_IN_PROJECT": "true"
+  },
+  "terminal.integrated.env.osx": {
+    "PYTHONPATH": "${workspaceFolder}/src",
+    "POETRY_VIRTUALENVS_IN_PROJECT": "true"
+  },
+  "terminal.integrated.env.windows": {
+    "PYTHONPATH": "${workspaceFolder}/src",
+    "POETRY_VIRTUALENVS_IN_PROJECT": "true"
+  },
+  
+  // ──────────────────────────── Language Specific ──────────────────────────
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.tabSize": 4
+  },
+  "[toml]": { "editor.tabSize": 2 },
+  "[yaml]": { "editor.tabSize": 2 },
+  "[json]": { "editor.tabSize": 2 },
+  "[markdown]": { "editor.tabSize": 2, "editor.wordWrap": "on" },
+  
+  // ──────────────────────────── Git ────────────────────────────────────────
+  "git.ignoreLimitWarning": true,
+  "git.autofetch": true,
+  
+  // ──────────────────────────── Extension Settings ─────────────────────────
+  "errorLens.enabled": true,
+  "errorLens.delay": 100,
+  "gitlens.codeLens.enabled": false,
+  "gitlens.currentLine.enabled": false,
+  "todo-tree.highlights.enabled": true,
+  "todo-tree.general.tags": ["TODO", "FIXME", "HACK", "BUG", "XXX", "NOTE", "WARNING"]
+}

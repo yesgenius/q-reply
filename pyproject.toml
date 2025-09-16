@@ -1,278 +1,215 @@
-# ============================
-# УНИВЕРСАЛЬНАЯ КОНФИГУРАЦИЯ ЛИНТЕРОВ
-# Python 3.12+ | Ruff 0.12+ | MyPy 1.0+
-# Все правила проверены и работают!
-# ============================
-
-# ============================
-# Ruff - All-in-one линтер и форматтер
-# ============================
+# ════════════════════════════════════════════════════════════════════════════════════
+#                                        RUFF
+# ════════════════════════════════════════════════════════════════════════════════════
 [tool.ruff]
-# Целевая версия Python
-target-version = "py312"
-
-# Длина строки (совместимо с Black)
-line-length = 88
-
-# Автоматическое исправление
-fix = true
-
-# Исключения (добавьте свои)
+target-version = "py312"  # Python version to target for compatibility checks
+line-length = 100  # Maximum line length before triggering E501
+src = ["calorie_balance_bot"]  # Source code directories for import resolution
+fix = true  # Automatically fix safe violations
 exclude = [
-    ".git",
-    ".venv",
-    "venv",
-    "__pycache__",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".pytest_cache",
-    "build",
-    "dist",
-    "*.egg-info",
-    "node_modules",
-    "migrations",
+  ".git", ".venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+  "dist", "build", "*.egg-info", ".dockerignore", "Dockerfile", "docker-compose*.yml",
+  "migrations", "alembic"
 ]
 
 [tool.ruff.lint]
-# ВСЕ эти правила проверены и работают в Ruff 0.12.11
 select = [
-    # === ОСНОВНЫЕ (минимальный набор) ===
-    "F",      # Pyflakes - ошибки Python
-    "E",      # pycodestyle - ошибки стиля кода
-    "W",      # pycodestyle - предупреждения стиля
-    "I",      # isort - сортировка импортов
-    "UP",     # pyupgrade - современный Python синтаксис
-    "B",      # flake8-bugbear - поиск багов
-    "SIM",    # flake8-simplify - упрощение кода
-    "RUF",    # Ruff-specific - правила самого Ruff
-
-    # === КАЧЕСТВО КОДА (рекомендуется) ===
-    "C90",    # mccabe - сложность кода
-    "N",      # pep8-naming - правила именования
-    "A",      # flake8-builtins - переопределение встроенных
-    "C4",     # flake8-comprehensions - лучшие comprehensions
-    "RET",    # flake8-return - оптимизация return
-    "ARG",    # flake8-unused-arguments - неиспользуемые аргументы
-    "PTH",    # flake8-use-pathlib - используй pathlib вместо os.path
-
-    # === БЕЗОПАСНОСТЬ И ПРОИЗВОДИТЕЛЬНОСТЬ ===
-    "S",      # flake8-bandit - безопасность
-    "PERF",   # perflint - производительность
-    "ASYNC",  # flake8-async - правила для async кода
-
-    # === ДОПОЛНИТЕЛЬНЫЕ (опционально) ===
-    "DTZ",    # flake8-datetimez - timezone-aware datetime
-    "EM",     # flake8-errmsg - сообщения об ошибках
-    "ISC",    # flake8-implicit-str-concat - конкатенация строк
-    "PIE",    # flake8-pie - разные улучшения
-    "T20",    # flake8-print - находит print() в проде
-    "Q",      # flake8-quotes - стиль кавычек
-    "TCH",    # flake8-type-checking - оптимизация импортов для типов
-    "PL",     # Pylint - подмножество правил Pylint
-    "TRY",    # tryceratops - обработка исключений
-    "FLY",    # flynt - конвертация в f-strings
+  "E", "W",  # pycodestyle errors and warnings
+  "F",  # pyflakes
+  "I",  # isort
+  "N",  # pep8-naming
+  "UP",  # pyupgrade
+  "B",  # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "SIM",  # flake8-simplify
+  "TCH",  # flake8-type-checking
+  "ARG",  # flake8-unused-arguments
+  "PTH",  # flake8-use-pathlib
+  "RUF",  # ruff-specific rules
+  "S",  # flake8-bandit (security)
+  "ASYNC",  # flake8-async
+  "D",  # pydocstyle
+  "PT",  # flake8-pytest-style
+  "PERF",  # perflint
+  "RET",  # flake8-return
+  "SLF",  # flake8-self
+  "SLOT",  # flake8-slots
+  "TRY",  # tryceratops
+  "FLY",  # flynt
+  "PIE",  # flake8-pie
+  "PL",  # pylint
+  "DTZ",  # flake8-datetimez
+  "G",  # flake8-logging-format
+  "T20",  # flake8-print
+  "ANN",  # flake8-annotations
 ]
-
-# Игнорируемые правила (разумные исключения)
 ignore = [
-    # Форматирование
-    "E501",   # Длина строки - форматтер сам решит
-    "W191",   # Табы - если используете
-
-    # Спорные правила
-    "B008",   # Вызов функций в значениях по умолчанию (нужно для FastAPI/Click)
-    "B905",   # zip без strict= (Python 3.10+)
-
-    # Слишком строгие
-    "S101",   # assert - нужен в тестах
-    "S105",   # Hardcoded passwords - много false positives
-    "S106",   # Hardcoded passwords - много false positives
-
-    # Для постепенной миграции
-    "UP007",  # Optional[X] vs X | None - если еще не готовы к новому синтаксису
-
-    # Сложность (настройте под проект)
-    "PLR0913", # Слишком много аргументов
-    "PLR0912", # Слишком много веток
-    "PLR0915", # Слишком много statements
-    "C901",    # Слишком сложная функция
-
-    # Exceptions
-    "TRY003",  # Длинные сообщения в исключениях
-    "EM101",   # Сырые строки в исключениях
-    "EM102",   # f-strings в исключениях
+  "D100", "D104", "D107", "D203", "D213",  # pydocstyle conflicts
+  "ANN101", "ANN102",  # self/cls annotations are redundant
+  "E501",  # line too long (handled by formatter)
+  "B008",  # function calls in argument defaults
+  "S101",  # use of assert
+  "PLR0913",  # too many arguments
+  "TRY003",  # long messages in exceptions
+  "RUF001", "RUF002", "RUF003",  # unicode issues
 ]
+fixable = ["ALL"]  # Rules that can be auto-fixed
+unfixable = ["F841", "F401"]  # Rules requiring manual review
 
-# Автоисправление
-fixable = ["ALL"]
-unfixable = ["F841"]  # Не удалять unused variables автоматически
-
-# Правила для конкретных файлов
 [tool.ruff.lint.per-file-ignores]
-# Тесты
-"test_*.py" = ["S101", "ARG", "PLR2004"]
-"tests/**/*.py" = ["S101", "ARG", "PLR2004"]
-"*_test.py" = ["S101", "ARG", "PLR2004"]
-
-# Конфигурационные файлы
-"settings.py" = ["E501", "S105"]
-"*/settings/*.py" = ["E501", "S105", "F405"]
-"config.py" = ["E501"]
-"conf.py" = ["E501"]
-
-# Скрипты
-"scripts/*.py" = ["T20"]  # print() разрешен в скриптах
-
-# __init__ файлы
-"__init__.py" = ["F401", "F403"]
-
-# Миграции
-"*/migrations/*.py" = ["E501", "ARG"]
+"tests/**" = ["S101", "D", "ARG", "PLR2004", "S106", "S311", "ANN"]
+"migrations/**" = ["D", "S", "DTZ"]
+"**/bootstrap/*.py" = ["T201"]  # Allow print in bootstrap
+"**/__init__.py" = ["F401", "D104"]  # Allow star imports in __init__
 
 [tool.ruff.lint.isort]
-# Сортировка импортов
-combine-as-imports = true
-force-wrap-aliases = true
-lines-after-imports = 2
-# known-first-party = ["q-reply"]
+known-first-party = ["calorie_balance_bot"]
+combine-as-imports = true  # Combine multiple imports from same module
+force-sort-within-sections = true  # Sort imports alphabetically within sections
+force-wrap-aliases = true  # Wrap long imports with parentheses
+lines-after-imports = 2  # Blank lines after import section
+required-imports = ["from __future__ import annotations"]  # Future annotations for better typing
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"  # Docstring style convention
 
 [tool.ruff.lint.mccabe]
-# Максимальная сложность функций
-max-complexity = 10
+max-complexity = 10  # Maximum cyclomatic complexity
 
 [tool.ruff.lint.pylint]
-# Настройки в стиле Pylint
-max-args = 6            # Максимум аргументов функции
-max-branches = 12       # Максимум веток
-max-returns = 6         # Максимум return в функции
-max-statements = 50     # Максимум statements в функции
+max-args = 7  # Maximum function arguments
+max-branches = 12  # Maximum branches in function
+max-returns = 5  # Maximum return statements
+max-statements = 40  # Maximum statements in function body
 
 [tool.ruff.format]
-# Форматирование (Black-совместимое)
-quote-style = "double"          # Двойные кавычки
-indent-style = "space"          # Пробелы для отступов
-line-ending = "auto"            # LF на Unix, CRLF на Windows
-skip-magic-trailing-comma = false
-docstring-code-format = true    # Форматировать код в docstrings
+quote-style = "double"  # Use double quotes for strings
+indent-style = "space"  # Use spaces for indentation
+skip-magic-trailing-comma = false  # Keep trailing commas
+line-ending = "lf"  # Unix-style line endings
+docstring-code-format = true  # Format code in docstrings
 
-# ============================
-# MyPy - Статическая типизация
-# ============================
+# ════════════════════════════════════════════════════════════════════════════════════
+#                                        MYPY
+# ════════════════════════════════════════════════════════════════════════════════════
 [tool.mypy]
-# Версия Python
-python_version = "3.12"
+python_version = "3.12"  # Python version for type checking
+files = ["calorie_balance_bot"]  # Files to type check
+strict = true  # Enable all strict type checking flags
+pretty = true  # Format error messages for readability
+show_error_context = true  # Show code context in errors
+show_column_numbers = true  # Display column numbers in errors
+show_error_codes = true  # Include error codes in messages
+color_output = true  # Enable colored output
+warn_return_any = true  # Warn about functions returning Any
+warn_unused_configs = true  # Warn about unused type: ignore comments
+warn_unused_ignores = false  # Don't warn about unused ignores (pragmatic)
+warn_redundant_casts = true  # Warn about unnecessary casts
+warn_unreachable = true  # Warn about unreachable code
+no_implicit_optional = true  # Require Optional for None default values
+no_implicit_reexport = true  # Require explicit re-exports
+disallow_untyped_decorators = true  # All decorators must be typed
+disallow_any_generics = true  # Disallow Any in generic types
+check_untyped_defs = true  # Check untyped function definitions
+strict_equality = true  # Use strict equality checks
+namespace_packages = true  # Support namespace packages
+explicit_package_bases = true  # Use explicit base paths for imports
+warn_no_return = true  # Warn about missing return statements
+enable_error_code = [
+  "truthy-bool",
+  "redundant-expr",
+  "possibly-undefined",
+]
+plugins = [
+  "pydantic.mypy",
+  "sqlalchemy.ext.mypy.plugin"
+]
+exclude = [
+  "^\\.venv", "^venv", "^\\.git", "^\\.mypy_cache", "^\\.pytest_cache",
+  "^\\.ruff_cache", "^dist", "^build", "^migrations", "^alembic"
+]
 
-# === СТРОГОСТЬ (выберите уровень) ===
+[tool.pydantic-mypy]
+init_forbid_extra = true  # Forbid extra attributes in models
+init_typed = true  # Require typed __init__ methods
+warn_required_dynamic_aliases = true  # Warn about dynamic aliases
 
-# Вариант 1: НАЧАЛЬНЫЙ (для legacy кода)
-strict = false
-warn_return_any = true
-warn_unused_configs = true
-check_untyped_defs = true
-
-# Вариант 2: СРЕДНИЙ (рекомендуется)
-# warn_return_any = true
-# warn_unused_configs = true
-# disallow_untyped_defs = false    # Постепенная типизация
-# check_untyped_defs = true
-# disallow_any_generics = false
-# strict_optional = true
-# warn_redundant_casts = true
-# warn_unused_ignores = true
-# warn_no_return = true
-# strict_equality = true
-
-# Вариант 3: СТРОГИЙ (для нового кода)
-# strict = true
-# disallow_any_generics = true
-# disallow_untyped_calls = true
-# no_implicit_reexport = true
-
-# Форматирование вывода
-pretty = true
-show_error_codes = true
-show_column_numbers = true
-color_output = true
-
-# Поиск модулей
-namespace_packages = true
-explicit_package_bases = true
-
-# Плагины (раскомментируйте нужные)
-# plugins = [
-#     "pydantic.mypy",
-#     "sqlalchemy.ext.mypy.plugin",
-# ]
-
-# Игнорирование импортов популярных библиотек
 [[tool.mypy.overrides]]
 module = [
-    "pytest.*",
-    "numpy.*",
-    "pandas.*",
-    "matplotlib.*",
-    "seaborn.*",
-    "sklearn.*",
-    "scipy.*",
-    "requests.*",
-    "aiohttp.*",
-    "httpx.*",
-    "fastapi.*",
-    "flask.*",
-    "django.*",
-    "sqlalchemy.*",
-    "alembic.*",
-    "redis.*",
-    "celery.*",
-    "boto3.*",
-    "PIL.*",
-    "cv2.*",
+  "aiogram.*",
+  "asyncpg.*",
+  "alembic.*",
+  "dependency_injector.*",
+  "tenacity.*"
 ]
-ignore_missing_imports = true
+ignore_missing_imports = true  # Ignore missing type stubs for third-party packages
 
-# Менее строгие правила для тестов
 [[tool.mypy.overrides]]
 module = "tests.*"
-disallow_untyped_defs = false
-check_untyped_defs = true
+disallow_untyped_defs = false  # Relax typing in tests
+disallow_untyped_decorators = false  # Allow untyped decorators in tests
+allow_redefinition = true  # Allow variable redefinition in tests
 
-# ============================
-# Pytest (опционально)
-# ============================
+# ════════════════════════════════════════════════════════════════════════════════════
+#                                       PYTEST
+# ════════════════════════════════════════════════════════════════════════════════════
 [tool.pytest.ini_options]
-minversion = "7.0"
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
+minversion = "8.0"  # Minimum pytest version required
+asyncio_mode = "auto"  # Auto-detect async tests and fixtures
+asyncio_default_fixture_loop_scope = "function"  # Event loop scope for fixtures
 addopts = [
-    "--strict-markers",
-    "--verbose",
-    "--tb=short",
-    "-ra",
+  "--strict-markers",  # Unknown markers are errors
+  "--strict-config",  # Invalid config is an error
+  "--tb=short",  # Shorter traceback format
+  "--cov=calorie_balance_bot",  # Measure coverage for package
+  "--cov-report=term-missing:skip-covered",  # Show missing lines
+  "--cov-report=html:htmlcov",  # Generate HTML report
+  "--cov-fail-under=80"  # Fail if coverage < 80%
+]
+testpaths = ["tests"]  # Directories containing tests
+pythonpath = ["."]  # Add to Python path for imports
+filterwarnings = [
+  "error::DeprecationWarning",
+  "error::PendingDeprecationWarning"
+]
+markers = [
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "integration: marks tests as integration tests",
+  "unit: marks tests as unit tests",
+  "smoke: marks tests as smoke tests"
 ]
 
-# ============================
-# Coverage (опционально)
-# ============================
+# ────────────────────────────────────────────────────────────────────────────────────
+#                                      COVERAGE
+# ────────────────────────────────────────────────────────────────────────────────────
 [tool.coverage.run]
-branch = true
-source = ["."]
-omit = [
-    "*/tests/*",
-    "*/test_*.py",
-    "*/.venv/*",
-    "*/venv/*",
-    "*/migrations/*",
-]
+source = ["calorie_balance_bot"]  # Source code to measure
+branch = true  # Measure branch coverage
+parallel = true  # Support parallel test execution
+omit = ["*/tests/*", "*/migrations/*", "*/__init__.py", "*/config.py"]
 
 [tool.coverage.report]
-precision = 2
-show_missing = true
-skip_covered = false
+precision = 2  # Decimal precision for percentages
+show_missing = true  # Show lines not covered
+skip_covered = false  # Don't hide files with 100% coverage
 exclude_lines = [
-    "pragma: no cover",
-    "if TYPE_CHECKING:",
-    "@abstractmethod",
-    "raise NotImplementedError",
+  "pragma: no cover",  # Explicit exclusion marker
+  "def __repr__",  # String representations
+  "def __str__",  # String conversions
+  "if TYPE_CHECKING:",  # Type checking blocks
+  "if typing.TYPE_CHECKING:",
+  "raise AssertionError",  # Assertions
+  "raise NotImplementedError",  # Abstract methods
+  "if __name__ == .__main__.:",  # Script entry points
+  "@abstractmethod",  # Abstract method decorators
+  "@abc.abstractmethod",
+  "@overload",  # Type overloads
+  "pass",  # Pass statements
+  "\\.\\.\\."  # Ellipsis
 ]
+
+[tool.coverage.html]
+directory = "htmlcov"  # Output directory for HTML reports
+
+[tool.coverage.xml]
+output = "coverage.xml"  # Output file for XML reports (CI/CD)

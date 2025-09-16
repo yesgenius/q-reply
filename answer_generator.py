@@ -17,14 +17,16 @@ Configuration:
     Adjust settings at the beginning of the script for IDE execution.
 """
 
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
 import json
 import logging
+from pathlib import Path
 import shutil
 import sys
 import time
-from datetime import datetime
-from enum import Enum
-from pathlib import Path
 from typing import Any
 
 import openpyxl
@@ -68,9 +70,7 @@ class CategorySearchMode(Enum):
 
     WITH_CATEGORY = "with_category"  # Search using detected category
     WITHOUT_CATEGORY = "without_category"  # Ignore categories in search
-    CATEGORY_FALLBACK = (
-        "category_fallback"  # Try with category first, fallback to without
-    )
+    CATEGORY_FALLBACK = "category_fallback"  # Try with category first, fallback to without
 
 
 # Column indices for CATEGORY sheet (1-based for openpyxl)
@@ -80,9 +80,7 @@ COL_CATEGORY_DESC = 2  # Column B
 # Search configuration
 TOP_K_SIMILAR = 5  # Number of similar questions to retrieve
 SIMILARITY_THRESHOLD = 0.15  # Minimum cosine similarity
-CATEGORY_SEARCH_MODE = (
-    CategorySearchMode.WITHOUT_CATEGORY
-)  # How to use categories in search
+CATEGORY_SEARCH_MODE = CategorySearchMode.WITHOUT_CATEGORY  # How to use categories in search
 
 # Embedding configuration
 EMBEDDING_MODEL = "EmbeddingsGigaR"
@@ -191,11 +189,7 @@ class AnswerGenerator:
                 raw_response = json.loads(raw_response)
 
             # Navigate: choices[0].message.content
-            content = (
-                raw_response.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
+            content = raw_response.get("choices", [{}])[0].get("message", {}).get("content", "")
             # Ensure string return type
             return str(content) if content is not None else ""
         except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError):
@@ -254,9 +248,7 @@ class AnswerGenerator:
             Conference topic string or None if not available.
         """
         if SHEET_T not in workbook.sheetnames:
-            logger.info(
-                f"Sheet '{SHEET_T}' not found, proceeding without conference topic"
-            )
+            logger.info(f"Sheet '{SHEET_T}' not found, proceeding without conference topic")
             return None
 
         sheet_t = workbook[SHEET_T]
@@ -276,9 +268,7 @@ class AnswerGenerator:
             Dictionary mapping category names to descriptions, or empty dict.
         """
         if not INPUT_FILE_QA.exists():
-            logger.info(
-                f"File {INPUT_FILE_QA} not found, proceeding without categories"
-            )
+            logger.info(f"File {INPUT_FILE_QA} not found, proceeding without categories")
             return {}
 
         try:
@@ -295,12 +285,8 @@ class AnswerGenerator:
             categories = {}
 
             for row_idx in range(START_ROW, sheet_category.max_row + 1):
-                category_name = sheet_category.cell(
-                    row=row_idx, column=COL_CATEGORY_NAME
-                ).value
-                category_desc = sheet_category.cell(
-                    row=row_idx, column=COL_CATEGORY_DESC
-                ).value
+                category_name = sheet_category.cell(row=row_idx, column=COL_CATEGORY_NAME).value
+                category_desc = sheet_category.cell(row=row_idx, column=COL_CATEGORY_DESC).value
 
                 # Skip empty rows
                 if category_name is None and category_desc is None:
@@ -313,9 +299,7 @@ class AnswerGenerator:
                         f"Name: {category_name}, Description: {category_desc}"
                     )
                     wb.close()
-                    raise ValueError(
-                        "All categories must have both name and description"
-                    )
+                    raise ValueError("All categories must have both name and description")
 
                 categories[str(category_name).strip()] = str(category_desc).strip()
 
@@ -395,9 +379,7 @@ class AnswerGenerator:
             category_params = getattr(get_category_prompt, "params", {})
             if category_params:
                 row += 1
-                params_sheet.cell(
-                    row=row, column=1, value="--- Category Model Parameters ---"
-                )
+                params_sheet.cell(row=row, column=1, value="--- Category Model Parameters ---")
                 row += 1
 
                 param_descriptions = {
@@ -424,9 +406,7 @@ class AnswerGenerator:
             answer_params = getattr(get_answer_prompt, "params", {})
             if answer_params:
                 row += 1
-                params_sheet.cell(
-                    row=row, column=1, value="--- Answer Model Parameters ---"
-                )
+                params_sheet.cell(row=row, column=1, value="--- Answer Model Parameters ---")
                 row += 1
 
                 param_descriptions = {
@@ -456,9 +436,7 @@ class AnswerGenerator:
         default_embedding_model = getattr(base_embedding, "DEFAULT_MODEL", "Unknown")
         params_sheet.cell(row=row, column=1, value="base_embedding.DEFAULT_MODEL")
         params_sheet.cell(row=row, column=2, value=default_embedding_model)
-        params_sheet.cell(
-            row=row, column=3, value="Default model for creating embeddings"
-        )
+        params_sheet.cell(row=row, column=3, value="Default model for creating embeddings")
 
         # Auto-adjust column widths
         for column in params_sheet.columns:
@@ -529,9 +507,7 @@ class AnswerGenerator:
         if LOG_ANSWER:
             # Remove existing LOG_ANSWER sheet if it exists
             if log_sheet_name in wb.sheetnames:
-                logger.info(
-                    f"Removing existing '{log_sheet_name}' sheet for fresh start"
-                )
+                logger.info(f"Removing existing '{log_sheet_name}' sheet for fresh start")
                 wb.remove(wb[log_sheet_name])
 
             # Create new LOG_ANSWER sheet
@@ -675,9 +651,7 @@ class AnswerGenerator:
                 # Add raw response if available
                 if raw_response is not None:
                     result_dict["response"] = format_json_for_excel(raw_response)
-                    result_dict["response_content"] = self.extract_response_content(
-                        raw_response
-                    )
+                    result_dict["response_content"] = self.extract_response_content(raw_response)
                 else:
                     result_dict["response"] = ""
                     result_dict["response_content"] = ""
@@ -699,9 +673,7 @@ class AnswerGenerator:
                     continue
 
         # All attempts failed
-        logger.error(
-            f"All {MAX_RETRY_ATTEMPTS_CATEGORY} categorization attempts failed"
-        )
+        logger.error(f"All {MAX_RETRY_ATTEMPTS_CATEGORY} categorization attempts failed")
         return {
             "category": "Error",
             "confidence": 0.0,
@@ -745,9 +717,7 @@ class AnswerGenerator:
             # Determine search strategy based on mode
             if CATEGORY_SEARCH_MODE == CategorySearchMode.WITHOUT_CATEGORY:
                 # Always search without category
-                logger.debug(
-                    "Searching without category filter (mode: WITHOUT_CATEGORY)"
-                )
+                logger.debug("Searching without category filter (mode: WITHOUT_CATEGORY)")
                 results = self.db_store.search_similar_questions(
                     question_embedding=embeddings[0],
                     category=None,
@@ -777,9 +747,7 @@ class AnswerGenerator:
                 )
 
                 if not results:
-                    logger.info(
-                        "No results with category, falling back to search without filter"
-                    )
+                    logger.info("No results with category, falling back to search without filter")
                     results = self.db_store.search_similar_questions(
                         question_embedding=embeddings[0],
                         category=None,
@@ -850,9 +818,7 @@ class AnswerGenerator:
                     continue
 
         # All attempts failed
-        logger.error(
-            f"All {MAX_RETRY_ATTEMPTS_ANSWER} answer generation attempts failed"
-        )
+        logger.error(f"All {MAX_RETRY_ATTEMPTS_ANSWER} answer generation attempts failed")
         return {
             "answer": f"Failed to generate answer after {MAX_RETRY_ATTEMPTS_ANSWER} attempts. Last error: {last_error!s}",
             "confidence": 0.0,
@@ -862,9 +828,7 @@ class AnswerGenerator:
             "response_content": "",
         }
 
-    def process_row(
-        self, sheet_q: Worksheet, sheet_log: Worksheet | None, row_idx: int
-    ) -> bool:
+    def process_row(self, sheet_q: Worksheet, sheet_log: Worksheet | None, row_idx: int) -> bool:
         """Process a single row from Q sheet.
 
         Args:
@@ -884,9 +848,7 @@ class AnswerGenerator:
                 return True
 
             question_str = str(question).strip()
-            question_preview = (
-                question_str[:80] + "..." if len(question_str) > 80 else question_str
-            )
+            question_preview = question_str[:80] + "..." if len(question_str) > 80 else question_str
             logger.info(f"Processing row {row_idx}: {question_preview}")
 
             # Step 1: Categorize question (optional) with retry
@@ -904,16 +866,12 @@ class AnswerGenerator:
                         )
 
             # Step 2: Search similar questions
-            similar_questions = self.search_similar_questions(
-                question_str, selected_category
-            )
+            similar_questions = self.search_similar_questions(question_str, selected_category)
 
             if not similar_questions:
                 logger.warning(f"No similar questions found for row {row_idx}")
                 # Write empty result
-                sheet_q.cell(
-                    row=row_idx, column=COL_Q_ANSWER, value="No similar questions found"
-                )
+                sheet_q.cell(row=row_idx, column=COL_Q_ANSWER, value="No similar questions found")
                 sheet_q.cell(row=row_idx, column=COL_Q_CONFIDENCE, value=0.0)
                 sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value="[]")
                 return True
@@ -931,18 +889,14 @@ class AnswerGenerator:
 
             if not answer_result:
                 logger.error(f"Failed to generate answer for row {row_idx}")
-                sheet_q.cell(
-                    row=row_idx, column=COL_Q_ANSWER, value="Failed to generate answer"
-                )
+                sheet_q.cell(row=row_idx, column=COL_Q_ANSWER, value="Failed to generate answer")
                 sheet_q.cell(row=row_idx, column=COL_Q_CONFIDENCE, value=0.0)
                 sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value="[]")
                 return False
 
             # Step 5: Write results to Q sheet with new columns
             # Write answer and its metadata
-            sheet_q.cell(
-                row=row_idx, column=COL_Q_ANSWER, value=answer_result.get("answer", "")
-            )
+            sheet_q.cell(row=row_idx, column=COL_Q_ANSWER, value=answer_result.get("answer", ""))
             sheet_q.cell(
                 row=row_idx,
                 column=COL_Q_CONFIDENCE,
@@ -965,9 +919,7 @@ class AnswerGenerator:
 
                 # Write similarity score
                 similarity_score = result.get("similarity", 0.0)
-                sheet_q.cell(
-                    row=row_idx, column=s_col, value=round(similarity_score, 4)
-                )
+                sheet_q.cell(row=row_idx, column=s_col, value=round(similarity_score, 4))
                 # Write question and answer
                 sheet_q.cell(row=row_idx, column=q_col, value=result["question"])
                 sheet_q.cell(row=row_idx, column=a_col, value=result["answer"])
@@ -1019,13 +971,9 @@ class AnswerGenerator:
                     # Skip category columns if no categorization (6 columns total)
                     col += 6
 
-                sheet_log.cell(
-                    row=row_idx, column=col, value=answer_result.get("answer", "")
-                )
+                sheet_log.cell(row=row_idx, column=col, value=answer_result.get("answer", ""))
                 col += 1
-                sheet_log.cell(
-                    row=row_idx, column=col, value=answer_result.get("confidence", "")
-                )
+                sheet_log.cell(row=row_idx, column=col, value=answer_result.get("confidence", ""))
                 col += 1
                 sheet_log.cell(
                     row=row_idx,
@@ -1033,13 +981,9 @@ class AnswerGenerator:
                     value=str(answer_result.get("sources_used", [])),
                 )
                 col += 1
-                sheet_log.cell(
-                    row=row_idx, column=col, value=answer_result.get("messages", "")
-                )
+                sheet_log.cell(row=row_idx, column=col, value=answer_result.get("messages", ""))
                 col += 1
-                sheet_log.cell(
-                    row=row_idx, column=col, value=answer_result.get("response", "")
-                )
+                sheet_log.cell(row=row_idx, column=col, value=answer_result.get("response", ""))
                 col += 1
                 sheet_log.cell(
                     row=row_idx,
@@ -1186,9 +1130,7 @@ class AnswerGenerator:
                                 f"Emergency save after error: saved up to row {last_successful}"
                             )
                         except Exception as save_error:
-                            logger.error(
-                                f"Could not perform emergency save: {save_error}"
-                            )
+                            logger.error(f"Could not perform emergency save: {save_error}")
                     continue
 
                 # Track successful processing
@@ -1199,9 +1141,7 @@ class AnswerGenerator:
                     try:
                         self.workbook.save(self.output_file)
                         self.save_resume_state(self.output_file, row_idx)
-                        logger.info(
-                            f"Progress saved: {idx}/{len(rows_to_process)} rows processed"
-                        )
+                        logger.info(f"Progress saved: {idx}/{len(rows_to_process)} rows processed")
                     except Exception as save_error:
                         logger.error(f"Could not save progress: {save_error}")
 
