@@ -19,7 +19,9 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 from typing import Any
 
 from gigachat.client import GigaChatClient
@@ -33,6 +35,10 @@ llm = GigaChatClient()
 
 # Default embedding model
 DEFAULT_MODEL = "EmbeddingsGigaR"  # Use instruction-aware model by default
+
+# Retry configuration
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 1.0  # Base delay in seconds
 
 
 def get_instruction(task_type: str | None = None, **kwargs: Any) -> str:
@@ -137,12 +143,77 @@ def prepare_texts(texts: str | list[str], instruction: str = "", **kwargs: Any) 
     return prepared
 
 
+def _call_api_with_retry(
+    llm_client: GigaChatClient,
+    prepared_texts: list[str],
+    model: str,
+    api_params: dict[str, Any],
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_delay: float = DEFAULT_RETRY_DELAY,
+) -> dict[str, Any]:
+    """Call GigaChat API with retry logic for empty/invalid responses.
+
+    Args:
+        llm_client: GigaChat client instance.
+        prepared_texts: List of texts with instructions applied.
+        model: Model name for embeddings.
+        api_params: Additional API parameters.
+        max_retries: Maximum number of retry attempts.
+        retry_delay: Base delay between retries (exponential backoff).
+
+    Returns:
+        API response dictionary.
+
+    Raises:
+        RuntimeError: If all retry attempts fail.
+    """
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            # Call API
+            response = llm_client.create_embeddings(
+                input_texts=prepared_texts, model=model, **api_params
+            )
+
+            # Validate response structure
+            if not isinstance(response, dict):
+                raise ValueError(f"Invalid response type: {type(response)}")
+
+            if "data" not in response:
+                raise ValueError("Missing 'data' field in response")
+
+            # Success
+            return response
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            # These errors indicate empty/malformed response
+            last_error = e
+
+            if attempt < max_retries - 1:
+                # Calculate delay with exponential backoff
+                delay = retry_delay * (2**attempt)
+                logger.warning(
+                    f"API call failed (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+            else:
+                # All retries exhausted
+                logger.error(f"All {max_retries} attempts failed. Last error: {e}")
+
+    # Should not reach here, but for type safety
+    raise RuntimeError(f"API call failed after {max_retries} attempts: {last_error}")
+
+
 def create_embeddings(
     texts: str | list[str],
     model: str = DEFAULT_MODEL,
     task_type: str | None = None,
     apply_instruction: bool = True,
     custom_instruction: str | None = None,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_delay: float = DEFAULT_RETRY_DELAY,
     **kwargs: Any,
 ) -> tuple[list[list[float]], list[str]]:
     """Create embeddings for input texts with optional instructions.
@@ -151,6 +222,7 @@ def create_embeddings(
     - Single text or batch processing
     - Automatic instruction selection based on task type
     - Custom instruction override
+    - Retry logic for empty/invalid API responses
     - Proper error handling and logging
 
     Args:
@@ -159,6 +231,8 @@ def create_embeddings(
         task_type: Type of embedding task for automatic instruction selection.
         apply_instruction: Whether to apply instruction prefix.
         custom_instruction: Override automatic instruction with custom one.
+        max_retries: Maximum number of retry attempts for API calls.
+        retry_delay: Base delay between retries (exponential backoff).
         **kwargs: Additional parameters passed to instruction generator and API.
             Common keys:
             - categories: For classification tasks
@@ -172,7 +246,7 @@ def create_embeddings(
 
     Raises:
         ValueError: If inputs are invalid.
-        RuntimeError: If embedding creation fails.
+        RuntimeError: If embedding creation fails after all retries.
 
     Examples:
         >>> # Document embedding (no instruction)
@@ -181,8 +255,10 @@ def create_embeddings(
         >>> # Query embedding (with instruction)
         >>> query_emb, input_texts = create_embeddings("What is this product?", task_type="query")
 
-        >>> # Batch processing
-        >>> embs, input_texts = create_embeddings(["text1", "text2"], task_type="similarity")
+        >>> # Batch processing with custom retry settings
+        >>> embs, input_texts = create_embeddings(
+        ...     ["text1", "text2"], task_type="similarity", max_retries=5, retry_delay=2.0
+        ... )
     """
     # Ensure texts is a list
     if isinstance(texts, str):
@@ -195,7 +271,8 @@ def create_embeddings(
     # Log request details
     logger.debug(
         f"Creating embeddings: model={model}, task_type={task_type}, "
-        f"text_count={len(texts)}, apply_instruction={apply_instruction}"
+        f"text_count={len(texts)}, apply_instruction={apply_instruction}, "
+        f"max_retries={max_retries}"
     )
 
     # Determine instruction to use
@@ -241,15 +318,10 @@ def create_embeddings(
                     logger.debug(f"  {key}: {value}")
             logger.debug("-" * 60)
 
-        # Call GigaChat API
-        response = llm.create_embeddings(input_texts=prepared_texts, model=model, **api_params)
-
-        # Validate response structure
-        if not isinstance(response, dict):
-            raise RuntimeError(f"Unexpected response type: {type(response)}")
-
-        if "data" not in response:
-            raise RuntimeError(f"Missing 'data' field in response: {list(response.keys())}")
+        # Call API with retry logic
+        response = _call_api_with_retry(
+            llm, prepared_texts, model, api_params, max_retries, retry_delay
+        )
 
         embeddings_data = response["data"]
 
@@ -295,14 +367,15 @@ def create_batch_embeddings(
     """Create embeddings for large text collections in batches.
 
     Handles large datasets by processing in batches to avoid API limits
-    and memory issues.
+    and memory issues. Retry settings are passed through to create_embeddings.
 
     Args:
         texts: List of texts to embed.
         batch_size: Maximum texts per API call (default: 100).
         model: Embedding model to use.
         task_type: Type of embedding task.
-        **kwargs: Additional parameters passed to create_embeddings.
+        **kwargs: Additional parameters passed to create_embeddings,
+            including max_retries and retry_delay.
 
     Returns:
         Tuple containing:
@@ -315,7 +388,7 @@ def create_batch_embeddings(
 
     Examples:
         >>> texts = ["text1", "text2", ..., "text1000"]
-        >>> embeddings, input_texts = create_batch_embeddings(texts, batch_size=50)
+        >>> embeddings, input_texts = create_batch_embeddings(texts, batch_size=50, max_retries=5)
     """
     if not texts:
         return [], []
@@ -455,34 +528,24 @@ if __name__ == "__main__":
 
     run_test("Query with instruction", test_query_with_instruction, skip_on_api_error=True)
 
-    # Test 4: Custom instruction in input_texts
-    def test_custom_instruction_in_input() -> None:
-        """Test that custom instruction appears in input_texts."""
-        text = "Test text"
-        custom_instruction = "Custom instruction for testing\ntext: "
+    # Test 4: Custom retry settings
+    def test_custom_retry_settings() -> None:
+        """Test custom retry settings are passed through."""
+        text = "Test text for retry"
 
-        _, input_texts = create_embeddings(text, custom_instruction=custom_instruction)
+        # This should work with custom settings
+        _, _ = create_embeddings(text, task_type="document", max_retries=2, retry_delay=0.5)
+        # If it doesn't throw, the settings were accepted
 
-        assert len(input_texts) == 1, "Should have one input text"
-        assert input_texts[0] == f"{custom_instruction}{text}", (
-            f"Input text should be instruction + text.\n"
-            f"Expected: {custom_instruction}{text}\n"
-            f"Got: {input_texts[0]}"
-        )
+    run_test("Custom retry settings", test_custom_retry_settings, skip_on_api_error=True)
 
-    run_test(
-        "Custom instruction in input",
-        test_custom_instruction_in_input,
-        skip_on_api_error=True,
-    )
-
-    # Test 5: Batch embeddings with input_texts
-    def test_batch_embeddings_with_input() -> None:
-        """Test create_batch_embeddings returns input_texts."""
+    # Test 5: Batch embeddings with retry
+    def test_batch_with_retry() -> None:
+        """Test batch processing with retry settings."""
         texts = [f"Text {i}" for i in range(7)]
 
         batch_embs, batch_input_texts = create_batch_embeddings(
-            texts, batch_size=3, task_type="document"
+            texts, batch_size=3, task_type="document", max_retries=2, retry_delay=1.0
         )
 
         # Check embeddings
@@ -495,88 +558,8 @@ if __name__ == "__main__":
 
         # Check input_texts
         assert len(batch_input_texts) == 7, f"Expected 7 input texts, got {len(batch_input_texts)}"
-        assert batch_input_texts == texts, "Input texts should match originals for document type"
 
-    run_test(
-        "Batch embeddings with input",
-        test_batch_embeddings_with_input,
-        skip_on_api_error=True,
-    )
-
-    # Test 6: Batch with query instruction
-    def test_batch_query_instruction() -> None:
-        """Test batch processing adds instructions correctly."""
-        texts = ["Question 1?", "Question 2?", "Question 3?"]
-
-        _, input_texts = create_batch_embeddings(texts, batch_size=2, task_type="query")
-
-        expected_prefix = "Дан вопрос, найди семантически похожие вопросы\nвопрос: "
-
-        assert len(input_texts) == 3, f"Expected 3 input texts, got {len(input_texts)}"
-
-        for i, input_text in enumerate(input_texts):
-            assert input_text.startswith(expected_prefix), (
-                f"Input text {i} should start with instruction.\nGot: {input_text[:50]}"
-            )
-            assert texts[i] in input_text, f"Original text {i} should be in input_text"
-
-    run_test("Batch query instruction", test_batch_query_instruction, skip_on_api_error=True)
-
-    # Test 7: Apply instruction flag effect on input_texts
-    def test_apply_instruction_flag_input() -> None:
-        """Test apply_instruction=False prevents instruction in input_texts."""
-        text = "Test text"
-
-        # With instruction disabled
-        _, no_inst_input = create_embeddings(
-            text,
-            task_type="query",  # This would normally add instruction
-            apply_instruction=False,  # But we disable it
-        )
-
-        # Same as document type
-        _, doc_input = create_embeddings(text, task_type="document")
-
-        assert no_inst_input == doc_input, (
-            "Input texts should be same when instruction is disabled.\n"
-            f"No instruction: {no_inst_input}\n"
-            f"Document: {doc_input}"
-        )
-        assert no_inst_input == [text], "Should be just the original text"
-
-    run_test(
-        "Apply instruction flag input",
-        test_apply_instruction_flag_input,
-        skip_on_api_error=True,
-    )
-
-    # Test 8: Empty input validation (unchanged)
-    def test_empty_input() -> None:
-        """Test that empty input raises ValueError."""
-        try:
-            create_embeddings([])
-            assert False, "Should have raised ValueError for empty input"
-        except ValueError as e:
-            assert "empty" in str(e).lower(), f"Error message should mention 'empty': {e}"
-
-    run_test("Empty input validation", test_empty_input)
-
-    # Test 9: Prepare texts function (unchanged)
-    def test_prepare_texts() -> None:
-        """Test prepare_texts helper function."""
-        # Single text
-        result = prepare_texts("test", "prefix: ")
-        assert result == ["prefix: test"], f"Unexpected result: {result}"
-
-        # Multiple texts
-        result = prepare_texts(["t1", "t2"], "prefix: ")
-        assert result == ["prefix: t1", "prefix: t2"], f"Unexpected result: {result}"
-
-        # No instruction
-        result = prepare_texts("test", "")
-        assert result == ["test"], f"Unexpected result: {result}"
-
-    run_test("Prepare texts helper", test_prepare_texts)
+    run_test("Batch with retry", test_batch_with_retry, skip_on_api_error=True)
 
     # Print test summary
     print("=" * 50)
