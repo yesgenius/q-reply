@@ -25,7 +25,7 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 DEFAULT_EMBEDDING_SIZE = 2560
-DEFAULT_SIMILARITY_THRESHOLD = 0.15
+DEFAULT_SIMILARITY_THRESHOLD = 0.5
 DEFAULT_TOP_K = 5
 
 from utils.logger import get_logger

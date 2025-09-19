@@ -20,7 +20,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import sys
-from typing import Optional
 
 
 __all__ = [
@@ -32,7 +31,7 @@ __all__ = [
 ]
 
 # Default configuration
-DEFAULT_FORMAT = "[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]"
+DEFAULT_FORMAT = "%(asctime)s | %(name)s | %(levelname)s | %(filename)s:%(lineno)d | %(message)s"
 DEFAULT_LEVEL = logging.INFO
 
 
