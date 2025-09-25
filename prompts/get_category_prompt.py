@@ -154,72 +154,211 @@ def _generate_system_prompt(**kwargs: Any) -> str:
     )
     categories_list = list(categories.keys())
 
+    # JSON schema for strict validation
+    json_schema = json.dumps(
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["category", "confidence", "reasoning"],
+            "properties": {
+                "category": {"type": "string", "enum": categories_list},
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "multipleOf": 0.01,
+                },
+                "reasoning": {
+                    "type": "string",
+                    "minLength": 1,
+                },
+            },
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    # JSON example with placeholders for clarity
+    json_example = json.dumps(
+        {
+            "category": "one of predefined categories",
+            "confidence": "number between 0.00 and 1.00 (step 0.01)",
+            "reasoning": "brief explanation (no more than two sentences)",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
     prompt = f"""
-You are an expert AI model for precise text categorization.
-Output MUST be valid single-line JSON.
-Your sole task is to analyze the user's question; if an answer is also provided, use it only as supporting context.
-Classify the **question** into exactly one category from the list below.
-If the answer conflicts with the question, prioritize the question.
+YOU ARE AN EXPERT AI MODEL FOR PRECISE TEXT CATEGORIZATION.
+
+YOUR SOLE TASK: Analyze the user's question and classify it into exactly one category.
+
+MANDATORY OUTPUT FORMAT:
+Return ONLY valid JSON matching this exact schema:
+{json_schema}
+
+Schema-based JSON example with placeholders:
+{json_example}
 
 MEMORIZE AND USE ONLY THESE CATEGORIES:
 {categories_description}
 
-You are strictly and absolutely prohibited from answering in any other categories.
+CRITICAL CATEGORIZATION RULES YOU MUST FOLLOW:
 
-PRODUCE THIS EXACT JSON STRUCTURE:
-{{"category":"CategoryName","confidence":0.00,"reasoning":"brief explanation (no more than two sentences)"}}
+1. ANALYSIS PRIORITY:
+   - ANALYZE the user's question as primary input
+   - USE any provided answer ONLY as supporting context
+   - PRIORITIZE the question if answer conflicts with it
 
-OBEY THESE ABSOLUTE JSON REQUIREMENTS:
-- Respond ONLY with a valid JSON object.
-- The output MUST be parseable by standard JSON parsers without errors.
-- The response MUST contain NOTHING else: no additional text, no markdown, no code fences, no commentary outside the JSON object.
+2. STRICT CATEGORIZATION:
+   - MATCH the question to EXACTLY ONE category from the list
+   - BASE classification on factual content exclusively
+   - SELECT the most specific and technically accurate option for multi-match cases
+   - EXCLUDE any speculative assessment
 
-EXECUTE THESE CATEGORIZATION COMMANDS:
-1. **Strict Categorization**:
-   - Match the question and the optional answer with one category, based on factual content exclusively, without speculative assessment.
-   - For questions matching multiple categories, select the most specific and technically accurate option
-2. **Confidence Scoring**:
-   Assign a confidence score using this exact scale:
-   - 0.9-1.0: Perfect, unambiguous match to category description
-   - 0.7-0.8: Strong match with minor vagueness or broad category
-   - 0.5-0.6: Partial match requiring minimal interpretation
-   - 0.3-0.4: Weak match based on limited keywords or themes
-   - 0.0-0.2: Pure guess; question doesn't fit well
-3. **Reasoning**: Provide a brief explanation (no more than two sentences) of why this particular category was chosen
+3. CONFIDENCE SCORING: ASSIGN exact confidence using this scale:
+   - 0.9-1.0 = Perfect, unambiguous match to category description
+   - 0.7-0.8 = Strong match with minor vagueness or broad category
+   - 0.5-0.6 = Partial match requiring minimal interpretation
+   - 0.3-0.4 = Weak match based on limited keywords or themes
+   - 0.0-0.2 = Pure guess; question doesn't fit well
+
+4. REASONING GENERATION: PROVIDE justification with these constraints:
+   - WRITE maximum two sentences
+   - EXPLAIN why this particular category was chosen
+   - USE Russian language
+   - MAINTAIN single-line format (no line breaks)
 
 ENFORCE THESE FIELD CONSTRAINTS:
-- CategoryName must be exactly one of: {", ".join([f'"{item}"' for item in categories_list])}
-- Confidence must be a float between 0.00 and 1.00 with exactly two decimals.
-- Reasoning must not exceed two sentences; must be one line; Russian.
+- category: MUST be exactly one of: {", ".join([f'"{item}"' for item in categories_list])}
+- confidence: MUST be a float between 0.00 and 1.00 with exactly two decimals
+- reasoning: MUST NOT exceed two sentences; MUST be one line; MUST be in Russian
 
-VALIDATE YOUR OUTPUT AGAINST THIS SCHEMA:
-{
-        json.dumps(
-            {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["category", "confidence", "reasoning"],
-                "properties": {
-                    "category": {"type": "string", "enum": categories_list},
-                    "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1,
-                        "multipleOf": 0.01,
-                    },
-                    "reasoning": {
-                        "type": "string",
-                        "minLength": 1,
-                        # "pattern": r'^[^"\\n]*$',
-                    },
-                },
-            },
-            ensure_ascii=False,
-        )
-    }
-"""
+NEVER:
+- Add explanatory text outside JSON
+- Include markdown formatting or code fences
+- Output commentary or additional text
+- Use categories outside the predefined list
+- Respond with invalid JSON
+
+ALWAYS:
+- Output pure single-line JSON only
+- Ensure JSON is parseable by standard parsers
+- Select from predefined categories exclusively
+- Provide confidence score with exactly two decimals
+- Keep reasoning concise and in Russian"""
+
     return prompt
+
+
+# def _generate_system_prompt(**kwargs: Any) -> str:
+#     """Generate system prompt for question categorization.
+
+#     Creates a structured prompt that instructs the LLM to categorize
+#     questions into predefined categories with JSON output.
+
+#     Args:
+#         **kwargs: Required parameters for categorization:
+#             categories (Dict[str, str]): Dictionary where keys are category names
+#                 and values are category descriptions.
+
+#     Returns:
+#         System prompt string for categorization task.
+
+#     Raises:
+#         ValueError: If required parameters are missing or invalid.
+
+#     Example:
+#         >>> prompt = _generate_system_prompt(
+#         ...     categories={
+#         ...         "Research": "Academic questions",
+#         ...         "Applied": "Practical questions",
+#         ...     }
+#         ... )
+#     """
+#     categories = kwargs.get("categories")
+
+#     # Validate required parameters
+#     if not categories or not isinstance(categories, dict):
+#         raise ValueError("categories dictionary is required for categorization")
+
+#     if not categories:
+#         raise ValueError("categories dictionary cannot be empty")
+
+#     # Format categories for the prompt
+#     categories_description = "\n".join(
+#         [f"- {name}: {description}" for name, description in categories.items()]
+#     )
+#     categories_list = list(categories.keys())
+
+#     prompt = f"""
+# You are an expert AI model for precise text categorization.
+# Output MUST be valid single-line JSON.
+# Your sole task is to analyze the user's question; if an answer is also provided, use it only as supporting context.
+# Classify the **question** into exactly one category from the list below.
+# If the answer conflicts with the question, prioritize the question.
+
+# MEMORIZE AND USE ONLY THESE CATEGORIES:
+# {categories_description}
+
+# You are strictly and absolutely prohibited from answering in any other categories.
+
+# PRODUCE THIS EXACT JSON STRUCTURE:
+# {{"category":"CategoryName","confidence":0.00,"reasoning":"brief explanation (no more than two sentences)"}}
+
+# OBEY THESE ABSOLUTE JSON REQUIREMENTS:
+# - Respond ONLY with a valid JSON object.
+# - The output MUST be parseable by standard JSON parsers without errors.
+# - The response MUST contain NOTHING else: no additional text, no markdown, no code fences, no commentary outside the JSON object.
+
+# EXECUTE THESE CATEGORIZATION COMMANDS:
+# 1. **Strict Categorization**:
+#    - Match the question and the optional answer with one category, based on factual content exclusively, without speculative assessment.
+#    - For questions matching multiple categories, select the most specific and technically accurate option
+# 2. **Confidence Scoring**:
+#    Assign a confidence score using this exact scale:
+#    - 0.9-1.0: Perfect, unambiguous match to category description
+#    - 0.7-0.8: Strong match with minor vagueness or broad category
+#    - 0.5-0.6: Partial match requiring minimal interpretation
+#    - 0.3-0.4: Weak match based on limited keywords or themes
+#    - 0.0-0.2: Pure guess; question doesn't fit well
+# 3. **Reasoning**: Provide a brief explanation (no more than two sentences) of why this particular category was chosen
+
+# ENFORCE THESE FIELD CONSTRAINTS:
+# - CategoryName must be exactly one of: {", ".join([f'"{item}"' for item in categories_list])}
+# - Confidence must be a float between 0.00 and 1.00 with exactly two decimals.
+# - Reasoning must not exceed two sentences; must be one line; Russian.
+
+# VALIDATE YOUR OUTPUT AGAINST THIS SCHEMA:
+# {
+#         json.dumps(
+#             {
+#                 "$schema": "https://json-schema.org/draft/2020-12/schema",
+#                 "type": "object",
+#                 "additionalProperties": False,
+#                 "required": ["category", "confidence", "reasoning"],
+#                 "properties": {
+#                     "category": {"type": "string", "enum": categories_list},
+#                     "confidence": {
+#                         "type": "number",
+#                         "minimum": 0,
+#                         "maximum": 1,
+#                         "multipleOf": 0.01,
+#                     },
+#                     "reasoning": {
+#                         "type": "string",
+#                         "minLength": 1,
+#                         # "pattern": r'^[^"\\n]*$',
+#                     },
+#                 },
+#             },
+#             ensure_ascii=False,
+#         )
+#     }
+# """
+#     return prompt
 
 
 def _generate_chat_history(**kwargs: Any) -> list[dict[str, str]]:

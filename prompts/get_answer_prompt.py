@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 import re
 from typing import Any
 
@@ -70,10 +71,55 @@ params: dict[str, Any] = {
     # "repetition_penalty": 1.1,
 }
 
+# Knowledge base configuration - module-level setting
+# First matching file in the tuple will be used
+knowledge_base = (
+    Path(__file__).stem + "_kbase.txt",  # get_answer_prompt_kbase.txt
+)
+
 # Global cached variables
 _system_prompt: str | None = None
 _chat_history: list[dict[str, str]] = []
 _current_topic: str | None = None  # Cache current topic for validation
+_loaded_knowledge_base: str | None = None  # Cache loaded knowledge base path
+
+
+def _load_knowledge_base() -> str | None:
+    """Load knowledge base content from configured files.
+
+    Attempts to load the first available knowledge base file
+    from the module-level configuration tuple.
+
+    Returns:
+        Knowledge base content as string, or None if not available.
+    """
+    global _loaded_knowledge_base
+
+    if not knowledge_base:
+        return None
+
+    # Get module directory
+    module_dir = Path(__file__).parent
+
+    for kb_filename in knowledge_base:
+        kb_path = module_dir / kb_filename
+
+        if kb_path.exists() and kb_path.is_file():
+            try:
+                with open(kb_path, encoding="utf-8") as f:
+                    content = f.read().strip()
+
+                if content:
+                    _loaded_knowledge_base = str(kb_path)
+                    logger.debug(f"Loaded knowledge base from: {kb_path}")
+                    return content
+
+            except OSError as e:
+                logger.warning(f"Could not read knowledge base {kb_path}: {e}")
+                continue
+
+    logger.debug("No knowledge base file found or all files empty")
+    return None
 
 
 def _format_user_prompt(question: str, qa_pairs: list[dict[str, str]]) -> str:
@@ -147,103 +193,136 @@ def _generate_system_prompt(**kwargs: Any) -> str:
     """
     topic = kwargs.get("topic")
 
-    # Base system prompt
-    base_prompt = """
-You are an expert AI model in the field of consulting at a professional conference, providing answers in correct JSON format.
-Your sole task is to analyze questions and provide comprehensive, accurate answers based on available context and domain expertise.
-Output MUST be valid single-line JSON.
-"""
+    # Load knowledge base if available
+    kb_content = _load_knowledge_base()
 
-    # Add topic context if provided
-    if topic:
-        topic_context = f"""
-FOCUS ON THIS CONFERENCE TOPIC:
-Current focus: {topic}
-Ensure all answers maintain relevance to this topic when applicable.
-"""
-    else:
-        topic_context = ""
-
-    # Instructions for answer generation with clear sources_used rules
-    instructions = f"""
-
-IDENTIFY AND USE THESE INFORMATION SOURCES:
-1. **Context Q&A Pairs**: Previous conference Q&A sessions provided in user message
-2. **Domain Knowledge**: Your technical expertise and industry best practices
-3. **Source Attribution**: Track and report which sources inform your answer
-
-PRODUCE THIS EXACT JSON STRUCTURE:
-{{"answer": "Your comprehensive answer here", "confidence": 0.00, "sources_used": ["context"]|["domain_knowledge"]|["context", "domain_knowledge"]}}
-
-OBEY THESE ABSOLUTE JSON REQUIREMENTS:
-- Respond ONLY with a valid JSON object
-- Output MUST be parseable by standard JSON parsers without errors
-- Response MUST contain NOTHING else: no additional text, no markdown, no code fences, no commentary outside the JSON object
-
-EXECUTE THESE ANSWER GENERATION COMMANDS:
-1. **Content Analysis**: Extract relevant information from provided Q&A pairs using exact matching and semantic understanding
-2. **Information Synthesis**: Combine multiple context sources when applicable, maintaining factual accuracy
-3. **Answer Construction**: Structure response with clear logic flow, specific examples, and actionable recommendations
-4. **Confidence Scoring**:
-   Assign confidence using this exact scale:
-   - 0.9-1.0: Complete answer with perfect context match or definitive domain knowledge
-   - 0.7-0.8: Strong answer with good context support or established best practices
-   - 0.5-0.6: Partial answer requiring moderate inference or limited context
-   - 0.3-0.4: Weak answer based on tangential context or general principles
-   - 0.0-0.2: Speculative answer with minimal supporting information
-5. **Source Attribution**:
-   MUST track information origin strictly, conservatively, and precisely:
-   - Use ["context"] ONLY when answer derives exclusively from Q&A pairs
-   - Use ["domain_knowledge"] ONLY when using general expertise without context
-   - Use ["context", "domain_knowledge"] when combining both sources in comparable proportions
-
-ENFORCE THESE FIELD CONSTRAINTS:
-- Answer: Complete response string, using \\n for line breaks where needed; language must be Russian
-- Confidence: Float between 0.00 and 1.00 with exactly two decimals
-- Sources_used: Array containing exactly one of: ["context"], ["domain_knowledge"], or ["context", "domain_knowledge"]
-
-MEET THESE ANSWER REQUIREMENTS:
-- Prioritize information from provided Context when directly relevant
-- Supplement with domain knowledge when context is insufficient
-- Maintain technical accuracy and professional tone
-- Provide actionable insights and specific examples where applicable
-
-VALIDATE YOUR OUTPUT AGAINST THIS SCHEMA:
-{
-        json.dumps(
-            {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["answer", "confidence", "sources_used"],
-                "properties": {
-                    "answer": {"type": "string", "minLength": 1},
-                    "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1,
-                        "multipleOf": 0.01,
+    # JSON schema for strict validation
+    json_schema = json.dumps(
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["answer", "confidence", "sources_used"],
+            "properties": {
+                "answer": {"type": "string", "minLength": 1},
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "multipleOf": 0.01,
+                },
+                "sources_used": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["context", "domain_knowledge"],
                     },
-                    "sources_used": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": ["context", "domain_knowledge"],
-                        },
-                        "minItems": 1,
-                        "maxItems": 2,
-                        "uniqueItems": True,
-                    },
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "uniqueItems": True,
                 },
             },
-            ensure_ascii=False,
-        )
-    }
-"""
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
-    prompt = base_prompt + topic_context + instructions
+    # JSON example with placeholders for clarity
+    json_example = json.dumps(
+        {
+            "answer": "comprehensive answer string with \\n for line breaks",
+            "confidence": "number between 0.00 and 1.00 (step 0.01)",
+            "sources_used": ["context"] or ["domain_knowledge"] or ["context", "domain_knowledge"],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
-    return prompt
+    # Topic context component
+    topic_section = (
+        f"""
+FOCUS ON THIS CONFERENCE TOPIC:
+
+{topic}
+
+MAINTAIN relevance to this topic when applicable."""
+        if topic
+        else ""
+    )
+
+    # Knowledge base component
+    knowledge_section = ""
+    if kb_content:
+        knowledge_section = f"""
+KNOWLEDGE BASE:
+The following information MUST be considered when generating answers:
+
+{kb_content}
+
+INTEGRATE this knowledge into responses where relevant."""
+
+    # Main system prompt with rigid command structure
+    system_prompt = f"""
+YOU ARE AN EXPERT CONSULTING AI AT A PROFESSIONAL CONFERENCE.
+
+YOUR SOLE TASK: Generate comprehensive, accurate answers based on context and domain expertise.
+
+MANDATORY OUTPUT FORMAT:
+Return ONLY valid JSON matching this exact schema:
+{json_schema}
+
+Schema-based JSON example with placeholders:
+{json_example}
+
+{knowledge_section}
+
+{topic_section}
+
+CRITICAL ANSWER GENERATION RULES YOU MUST FOLLOW:
+
+1. INFORMATION SOURCES IDENTIFICATION:
+   - Context Q&A Pairs: Previous conference Q&A sessions in user message
+   - Domain Knowledge: Your technical expertise and industry best practices
+   - TRACK which sources inform your answer
+
+2. CONTENT ANALYSIS: EXTRACT relevant information using:
+   - Exact matching from provided Q&A pairs
+   - Semantic understanding of context relationships
+   - PRIORITIZE context over general knowledge when available
+
+3. ANSWER CONSTRUCTION: STRUCTURE response with:
+   - START with a direct, concise answer to the question in 1-2 sentences maximum.
+   - PROVIDE supporting evidence, if they exist.
+   - INCLUDE relevant context explaining WHY this answer matters.
+   - EXCLUDE personal data is any information relating to an identified or identifiable natural person (data subject). This includes details such as name, address, phone number, email, passport information, etc.
+   - Language: Russian (mandatory)
+   - Use \\n for line breaks in answer field
+
+4. CONFIDENCE SCORING: ASSIGN exact confidence using this scale:
+   - 0.9-1.0 = Complete answer with perfect context match or definitive knowledge
+   - 0.7-0.8 = Strong answer with good context support or established practices
+   - 0.5-0.6 = Partial answer requiring moderate inference or limited context
+   - 0.3-0.4 = Weak answer based on tangential context or general principles
+   - 0.0-0.2 = Speculative answer with minimal supporting information
+
+5. SOURCE ATTRIBUTION: TRACK information origin STRICTLY:
+   - ["context"] = Answer derives EXCLUSIVELY from Q&A pairs
+   - ["domain_knowledge"] = Using ONLY general expertise without context
+   - ["context", "domain_knowledge"] = Combining BOTH sources in comparable proportions
+
+NEVER:
+- Add explanatory text outside JSON
+- Include markdown formatting or code fences
+- Discuss your reasoning process
+- Output anything except the JSON object
+
+ALWAYS:
+- Output pure single-line JSON only
+- Maintain technical accuracy
+- Prioritize context information when directly relevant
+- Supplement with domain knowledge when context insufficient"""
+
+    return system_prompt
 
 
 def _generate_chat_history(**kwargs: Any) -> list[dict[str, str]]:
@@ -730,23 +809,19 @@ def run(
 
     except Exception as e:
         logger.error(f"Answer generation failed: {e}")
-        logger.error(f"    message['content']: ['{message['content']}]'")
-        logger.error(f"    result_json: ['{result_json}]'")
-        logger.error(f"    raw_response: ['{raw_response}]'")
-        logger.error(f"    messages_list: ['{messages_list}]'")
         raise
 
 
 # Test section
 if __name__ == "__main__":
-    """Test the answer generation module for RAG system with raw response support."""
+    """Test the answer generation module for RAG system with knowledge base support."""
 
     logging.basicConfig(
         level=logging.INFO,
         format="[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]",
     )
 
-    print("=== Answer Generation Module Test (RAG System with Raw Response) ===\n")
+    print("=== Answer Generation Module Test (RAG System with Knowledge Base) ===\n")
 
     # Test 1: Initialize without topic
     try:
@@ -780,9 +855,92 @@ if __name__ == "__main__":
         logger.error(f"Test 2 failed: {e}")
         raise
 
-    # Test 3: Generate answer with minimal context and raw response
+    # Test 3: Test knowledge base loading
     try:
-        print("Test 3: Generate answer with minimal context and raw response")
+        print("Test 3: Test knowledge base loading")
+
+        # Create a temporary knowledge base file for testing
+        test_kb_file = Path(__file__).parent / (Path(__file__).stem + "_kbase.txt")
+        test_kb_content = """Important Conference Rules:
+1. All presentations should be under 20 minutes
+2. Questions from the audience are limited to 5 minutes
+3. Coffee breaks are at 10:30 AM and 3:00 PM
+
+Technical Guidelines:
+- Use microservices for scalability
+- Implement proper monitoring and logging
+- Follow the twelve-factor app methodology"""
+
+        # Test with knowledge base file present
+        try:
+            # Create test knowledge base file
+            with open(test_kb_file, "w", encoding="utf-8") as f:
+                f.write(test_kb_content)
+
+            # Reset cached prompt to force reload
+            _system_prompt = None
+            _loaded_knowledge_base = None
+
+            # Generate prompt - should load knowledge base
+            prompt = update_system_prompt(topic="Test Conference")
+
+            # Verify knowledge base was loaded
+            if _loaded_knowledge_base:
+                print(f"✓ Knowledge base loaded from: {_loaded_knowledge_base}")
+
+            # Check if knowledge content is in prompt
+            if "Important Conference Rules" in prompt:
+                print("✓ Knowledge base content included in system prompt")
+            else:
+                print("✗ Knowledge base content not found in prompt")
+
+            print("✓ Knowledge base feature working correctly\n")
+
+        finally:
+            # Clean up test file
+            if test_kb_file.exists():
+                test_kb_file.unlink()
+                print("✓ Test knowledge base file cleaned up\n")
+
+    except Exception as e:
+        logger.error(f"Test 3 failed: {e}")
+        raise
+
+    # Test 4: Test without knowledge base file
+    try:
+        print("Test 4: Test without knowledge base file (normal operation)")
+
+        # Reset cached prompt
+        _system_prompt = None
+        _loaded_knowledge_base = None
+
+        # Ensure no knowledge base file exists
+        test_kb_file = Path(__file__).parent / (Path(__file__).stem + "_kbase.txt")
+        if test_kb_file.exists():
+            test_kb_file.unlink()
+
+        # Generate prompt - should work without knowledge base
+        prompt = update_system_prompt(topic="Test Conference Without KB")
+
+        if _loaded_knowledge_base is None:
+            print("✓ System works correctly without knowledge base file")
+
+        if "Test Conference Without KB" in prompt:
+            print("✓ Topic still included when knowledge base absent")
+
+        print("✓ Module handles missing knowledge base gracefully\n")
+
+    except Exception as e:
+        logger.error(f"Test 4 failed: {e}")
+        raise
+
+    # Test 5: Generate answer with minimal context
+    try:
+        print("Test 5: Generate answer with minimal context")
+
+        # Reset system prompt for clean test
+        _system_prompt = None
+        update_system_prompt(topic="Cloud Native Architecture")
 
         # Minimal Q&A context
         minimal_qa = [
@@ -797,39 +955,17 @@ if __name__ == "__main__":
         print("\n--- INPUT DATA ---")
         print(f"Question: {question}")
         print(f"Context Q&A pairs count: {len(minimal_qa)}")
-        print("Q&A pairs content:")
-        for i, qa in enumerate(minimal_qa, 1):
-            print(f"  Pair {i}:")
-            print(f"    Q: {qa['question']}")
-            print(f"    A: {qa['answer'][:80]}...")
 
         try:
             result_json, messages, raw_response = run(question, minimal_qa)
             result = json.loads(result_json)
 
             print("\n--- OUTPUT DATA ---")
-            print("Returned JSON structure:")
-            print(f"  Fields: {list(result.keys())}")
-            print("\nParsed result content:")
             print(f"  answer: {result['answer'][:150]}...")
             if "confidence" in result:
                 print(f"  confidence: {result['confidence']}")
             if "sources_used" in result:
                 print(f"  sources_used: {result['sources_used']}")
-
-            print("\n--- RAW RESPONSE ---")
-            print(f"Raw response type: {type(raw_response)}")
-            print(f"Raw response keys: {list(raw_response.keys())}")
-            if "model" in raw_response:
-                print(f"Model used: {raw_response['model']}")
-            if "created" in raw_response:
-                print(f"Created timestamp: {raw_response['created']}")
-            if raw_response.get("choices"):
-                print(f"Response has {len(raw_response['choices'])} choice(s)")
-
-            print("\n--- MESSAGES SENT TO LLM ---")
-            print(f"Total messages: {len(messages)}")
-            print(f"Messages sent: {len(messages)}")
 
             print("\n✓ Test completed successfully")
 
@@ -840,75 +976,12 @@ if __name__ == "__main__":
         print("\n" + "=" * 50 + "\n")
 
     except Exception as e:
-        logger.error(f"Test 3 failed: {e}")
+        logger.error(f"Test 5 failed: {e}")
         raise
 
-    # Test 4: Generate answer with rich context and verify raw response
+    # Test 6: Error handling
     try:
-        print("Test 4: Generate answer with rich context and verify raw response")
-
-        # Rich Q&A context
-        rich_qa = [
-            {
-                "question": "How do you implement CI/CD for microservices?",
-                "answer": "We use GitLab CI with separate pipelines per service, automated testing, and Kubernetes deployments.",
-            },
-            {
-                "question": "What's your monitoring strategy?",
-                "answer": "We implement the three pillars: metrics with Prometheus, logs with ELK, and traces with Jaeger.",
-            },
-            {
-                "question": "How do you handle service discovery?",
-                "answer": "We use Consul for service registry and health checking, integrated with our load balancers.",
-            },
-        ]
-
-        question = "What are the key considerations for microservices in production?"
-
-        print("\n--- INPUT DATA ---")
-        print(f"Question: {question}")
-        print(f"Context Q&A pairs count: {len(rich_qa)}")
-
-        try:
-            result_json, messages, raw_response = run(question, rich_qa)
-            result = json.loads(result_json)
-
-            print("\n--- OUTPUT DATA ---")
-            print("Parsed result:")
-            print(f"  Answer length: {len(result['answer'])} characters")
-            if "confidence" in result:
-                print(f"  Confidence value: {result['confidence']}")
-            if "sources_used" in result:
-                print(f"  Sources used: {result['sources_used']}")
-
-            print("\n--- RAW RESPONSE METADATA ---")
-            for key in ["id", "object", "created", "model"]:
-                if key in raw_response:
-                    print(f"  {key}: {raw_response[key]}")
-
-            # Verify raw response structure
-            if "usage" in raw_response:
-                usage = raw_response["usage"]
-                print("\n--- TOKEN USAGE ---")
-                for usage_key in ["prompt_tokens", "completion_tokens", "total_tokens"]:
-                    if usage_key in usage:
-                        print(f"  {usage_key}: {usage[usage_key]}")
-
-            print("\n✓ Test completed successfully with full raw response")
-
-        except Exception as e:
-            logger.error(f"Failed to generate answer: {e}")
-            print(f"\n✗ Answer generation failed: {e}")
-
-        print("\n" + "=" * 50 + "\n")
-
-    except Exception as e:
-        logger.error(f"Test 4 failed: {e}")
-        raise
-
-    # Test 5: Error handling with raw response
-    try:
-        print("Test 5: Error handling with raw response")
+        print("Test 6: Error handling")
 
         print("\n1. Test with empty qa_pairs:")
         try:
@@ -936,69 +1009,9 @@ if __name__ == "__main__":
         print("\n" + "=" * 50 + "\n")
 
     except Exception as e:
-        logger.error(f"Test 5 failed: {e}")
-        raise
-
-    # Test 6: Verify complete data flow with raw response
-    try:
-        print("Test 6: Verify complete data flow with raw response")
-
-        test_qa = [
-            {
-                "question": "What is Kubernetes?",
-                "answer": "Container orchestration platform.",
-            }
-        ]
-
-        question = "How to deploy to Kubernetes?"
-
-        print("\n--- FUNCTION SIGNATURE ---")
-        print("run(user_question, qa_pairs, custom_params=None)")
-        print("Returns: Tuple[str, List[Dict[str, str]], Dict[str, Any]]")
-        print("         (result_json, messages_list, raw_response)")
-
-        result_json, messages, raw_response = run(question, test_qa)
-
-        print("\n--- RETURN VALUES ---")
-        print(f"1. result_json: type={type(result_json)}, length={len(result_json)} chars")
-        print(f"2. messages: type={type(messages)}, length={len(messages)} items")
-        print(
-            f"3. raw_response: type={type(raw_response)}, has_keys={raw_response is not None and isinstance(raw_response, dict)}"
-        )
-
-        # Verify raw response is complete
-        print("\n--- RAW RESPONSE STRUCTURE ---")
-        if raw_response:
-            print(f"Top-level keys: {list(raw_response.keys())}")
-
-            # Check for standard OpenAI-like response structure
-            expected_keys = ["id", "object", "created", "model", "choices"]
-            present_keys = [k for k in expected_keys if k in raw_response]
-            missing_keys = [k for k in expected_keys if k not in raw_response]
-
-            print(f"Present standard keys: {present_keys}")
-            if missing_keys:
-                print(f"Missing standard keys: {missing_keys}")
-
-            # Verify we can access the same content through raw response
-            if raw_response.get("choices"):
-                choice = raw_response["choices"][0]
-                if "message" in choice and "content" in choice["message"]:
-                    raw_content = choice["message"]["content"]
-                    print("\n✓ Can access content through raw response")
-                    print(
-                        f"✓ Content matches parsed result: {result_json in raw_content or json.loads(result_json)['answer'] in raw_content}"
-                    )
-
-        print("\n✓ Test 6 completed successfully - raw response fully integrated")
-        print("\n" + "=" * 50 + "\n")
-
-    except Exception as e:
         logger.error(f"Test 6 failed: {e}")
-        print(f"\n✗ Test 6 failed with error: {e}")
         raise
 
     print("\n=== All tests completed successfully ===")
-    print(
-        "The module now returns (result_json, messages_list, raw_response) like get_category_prompt.py"
-    )
+    print("Knowledge base feature has been integrated successfully!")
+    print("Place a file named 'get_answer_prompt_kbase.txt' in the module directory to use it.")
