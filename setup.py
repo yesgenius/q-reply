@@ -71,8 +71,37 @@ def download_archive(url: str, destination: str) -> None:
         fail_fast(f"Unexpected error during download: {e}")
 
 
+def merge_directories(src: Path, dst: Path) -> None:
+    """Recursively merge source directory into destination.
+
+    Files are overwritten, directories are merged without deletion.
+
+    Args:
+        src: Source directory path.
+        dst: Destination directory path.
+    """
+    if not dst.exists():
+        dst.mkdir(parents=True, exist_ok=True)
+
+    for item in src.iterdir():
+        src_path = src / item.name
+        dst_path = dst / item.name
+
+        if src_path.is_dir():
+            # Recursively merge subdirectories
+            merge_directories(src_path, dst_path)
+        else:
+            # Overwrite file (remove old if exists, then copy new)
+            if dst_path.exists():
+                dst_path.unlink()
+            shutil.copy2(src_path, dst_path)
+
+
 def extract_archive(archive_path: str, target_dir: Path) -> None:
-    """Extract archive contents to current directory.
+    """Extract and merge archive contents into current directory.
+
+    Files are overwritten, directories are merged (not replaced).
+    Existing files not in archive remain untouched.
 
     Args:
         archive_path: Path to zip archive.
@@ -81,39 +110,40 @@ def extract_archive(archive_path: str, target_dir: Path) -> None:
     Raises:
         SystemExit: If extraction fails.
     """
-    print_status("Extracting archive...")
+    print_status("Extracting and merging archive contents...")
 
     try:
         with zipfile.ZipFile(archive_path, "r") as zip_ref:
-            # Get root folder name in archive (usually 'q-reply-main')
+            # Get root folder name in archive
             archive_members = zip_ref.namelist()
             if not archive_members:
                 fail_fast("Archive is empty")
 
-            # Identify root folder in archive
+            # Identify root folder in archive (e.g., 'q-reply-main')
             root_folder = archive_members[0].split("/")[0]
 
             # Extract to temporary directory first
             with tempfile.TemporaryDirectory() as temp_dir:
                 zip_ref.extractall(temp_dir)
 
-                # Move contents from root folder to target directory
+                # Source directory in temp location
                 source_dir = Path(temp_dir) / root_folder
 
+                # Merge contents intelligently
                 for item in source_dir.iterdir():
-                    destination = target_dir / item.name
+                    src_item = source_dir / item.name
+                    dst_item = target_dir / item.name
 
-                    # Handle existing files/directories
-                    if destination.exists():
-                        if destination.is_dir():
-                            shutil.rmtree(destination)
-                        else:
-                            destination.unlink()
+                    if src_item.is_dir():
+                        # Merge directory contents recursively
+                        merge_directories(src_item, dst_item)
+                    else:
+                        # Overwrite single file
+                        if dst_item.exists():
+                            dst_item.unlink()
+                        shutil.copy2(src_item, dst_item)
 
-                    # Move item to target directory
-                    shutil.move(str(item), str(destination))
-
-        print_status("Extraction completed", "SUCCESS")
+        print_status("Archive merged successfully", "SUCCESS")
 
     except zipfile.BadZipFile:
         fail_fast("Invalid or corrupted archive file")
@@ -227,7 +257,7 @@ def get_activation_commands() -> list[str]:
 
 
 def main() -> None:
-    """Main setup workflow."""
+    """Main setup workflow with safe merge strategy."""
     print_status("Starting project setup", "INFO")
     print_status(f"Python version: {sys.version}", "INFO")
     print_status(f"Working directory: {os.getcwd()}", "INFO")
@@ -238,16 +268,16 @@ def main() -> None:
         # Step 1: Download archive
         download_archive(PROJECT_URL, TEMP_ARCHIVE)
 
-        # Step 2: Extract archive to current directory
+        # Step 2: Extract and merge archive (preserves existing files not in archive)
         extract_archive(TEMP_ARCHIVE, current_dir)
 
-        # Step 3: Check for requirements.txt
+        # Step 3: Check for requirements.txt and setup virtual environment
         requirements_path = current_dir / "requirements.txt"
 
         if requirements_path.exists():
             print_status("Found requirements.txt", "INFO")
 
-            # Step 4: Setup virtual environment (removes old .venv if exists)
+            # Step 4: Setup fresh virtual environment
             setup_virtual_environment(VENV_DIR)
 
             # Step 5: Install dependencies
@@ -257,20 +287,23 @@ def main() -> None:
         else:
             print_status("No requirements.txt found, skipping venv setup", "WARNING")
 
-        # Step 7: Cleanup
+        # Step 6: Cleanup temporary files only
         cleanup_archive(TEMP_ARCHIVE)
 
         # Final status
         print("\n" + "=" * 50)
         print_status("Setup completed successfully!", "SUCCESS")
-        print("\nTo activate the virtual environment, run:")
 
-        # Display activation commands
-        commands = get_activation_commands()
-        for cmd in commands:
-            print(f"  {cmd}")
+        if requirements_path.exists():
+            print("\nTo activate the virtual environment, run:")
 
-        print("\nProject is ready for development!")
+            # Display activation commands
+            commands = get_activation_commands()
+            for cmd in commands:
+                print(f"  {cmd}")
+
+        print("\nProject files have been merged safely.")
+        print("Existing files not in the archive were preserved.")
         print("=" * 50)
 
     except KeyboardInterrupt:
