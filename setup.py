@@ -212,15 +212,18 @@ def cleanup_archive(archive_path: str) -> None:
         print_status(f"Warning: Could not remove archive: {e}", "WARNING")
 
 
-def get_activation_command() -> str:
-    """Get platform-specific venv activation command.
+def get_activation_commands() -> list[str]:
+    """Get platform-specific venv activation commands.
 
     Returns:
-        Activation command string for current platform.
+        List of activation command strings for current platform.
     """
     if sys.platform == "win32":
-        return f"{VENV_DIR}\\Scripts\\activate"
-    return f"source {VENV_DIR}/bin/activate"
+        return [
+            f"{VENV_DIR}\\Scripts\\activate.bat  # Windows CMD",
+            f"{VENV_DIR}\\Scripts\\Activate.ps1  # Windows PowerShell",
+        ]
+    return [f"source {VENV_DIR}/bin/activate"]
 
 
 def main() -> None:
@@ -244,15 +247,13 @@ def main() -> None:
         if requirements_path.exists():
             print_status("Found requirements.txt", "INFO")
 
-            # Step 4: Setup virtual environment
+            # Step 4: Setup virtual environment (removes old .venv if exists)
             setup_virtual_environment(VENV_DIR)
 
             # Step 5: Install dependencies
             install_requirements(VENV_DIR, str(requirements_path))
 
-            # Step 6: Remove requirements.txt as specified
-            requirements_path.unlink()
-            print_status("Removed requirements.txt", "INFO")
+            print_status("Virtual environment configured with all dependencies", "SUCCESS")
         else:
             print_status("No requirements.txt found, skipping venv setup", "WARNING")
 
@@ -263,7 +264,12 @@ def main() -> None:
         print("\n" + "=" * 50)
         print_status("Setup completed successfully!", "SUCCESS")
         print("\nTo activate the virtual environment, run:")
-        print(f"  {get_activation_command()}")
+
+        # Display activation commands
+        commands = get_activation_commands()
+        for cmd in commands:
+            print(f"  {cmd}")
+
         print("\nProject is ready for development!")
         print("=" * 50)
 

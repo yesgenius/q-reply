@@ -837,12 +837,12 @@ def run(
         # Parse and validate JSON response (includes category validation)
         parsed_result = _parse_json_response(response_text)
 
-        # Validate category against current categories if available
-        if _current_categories and parsed_result["category"] not in _current_categories:
-            raise ValueError(
-                f"Invalid category '{parsed_result['category']}'. "
-                f"Must be one of: {', '.join(_current_categories.keys())}"
-            )
+        # # Validate category against current categories if available
+        # if _current_categories and parsed_result["category"] not in _current_categories:
+        #     raise ValueError(
+        #         f"Invalid category '{parsed_result['category']}'. "
+        #         f"Must be one of: {', '.join(_current_categories.keys())}"
+        #     )
 
         # Return as formatted JSON string with messages and raw response
         result_json = json.dumps(parsed_result, ensure_ascii=False, indent=2)
@@ -850,10 +850,10 @@ def run(
 
     except Exception as e:
         logger.error(f"Categorization failed: {e}")
-        logger.error(f"    message['content']: ['{message['content']}]'")
-        logger.error(f"    result_json: ['{result_json}]'")
-        logger.error(f"    raw_response: ['{raw_response}]'")
-        logger.error(f"    messages_list: ['{messages_list}]'")
+        # logger.error(f"    message['content']: ['{message['content']}]'")
+        # logger.error(f"    result_json: ['{result_json}]'")
+        # logger.error(f"    raw_response: ['{raw_response}]'")
+        # logger.error(f"    messages_list: ['{messages_list}]'")
         raise
 
 
