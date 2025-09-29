@@ -231,7 +231,7 @@ def _generate_system_prompt(**kwargs: Any) -> str:
     json_example = json.dumps(
         {
             "answer": "comprehensive answer string with \\n for line breaks",
-            "confidence": "number between 0.00 and 1.00 (step 0.01)",
+            "confidence": 0.91,
             "sources_used": ["context"] or ["domain_knowledge"] or ["context", "domain_knowledge"],
         },
         ensure_ascii=False,
@@ -317,7 +317,7 @@ NEVER:
 - Output anything except the JSON object
 
 ALWAYS:
-- Output pure single-line JSON only
+- Output pure JSON only
 - Maintain technical accuracy
 - Prioritize context information when directly relevant
 - Supplement with domain knowledge when context insufficient"""

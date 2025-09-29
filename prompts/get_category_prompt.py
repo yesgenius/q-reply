@@ -182,8 +182,8 @@ def _generate_system_prompt(**kwargs: Any) -> str:
     # JSON example with placeholders for clarity
     json_example = json.dumps(
         {
-            "category": "one of predefined categories",
-            "confidence": "number between 0.00 and 1.00 (step 0.01)",
+            "category": "unrecognized",
+            "confidence": 0.91,
             "reasoning": "brief explanation (no more than two sentences)",
         },
         ensure_ascii=False,
@@ -199,7 +199,7 @@ MANDATORY OUTPUT FORMAT:
 Return ONLY valid JSON matching this exact schema:
 {json_schema}
 
-Schema-based JSON example with placeholders:
+Schema-based JSON example:
 {json_example}
 
 MEMORIZE AND USE ONLY THESE CATEGORIES:
@@ -213,9 +213,10 @@ CRITICAL CATEGORIZATION RULES YOU MUST FOLLOW:
    - PRIORITIZE the question if answer conflicts with it
 
 2. STRICT CATEGORIZATION:
-   - MATCH the question to EXACTLY ONE category from the list
+   - MATCH the question to EXACTLY ONE category from the predefined list
    - BASE classification on factual content exclusively
-   - SELECT the most specific and technically accurate option for multi-match cases
+   - WHEN multiple categories apply, CHOOSE the one with strongest semantic match
+   - NEVER create, modify, or combine category names
    - EXCLUDE any speculative assessment
 
 3. CONFIDENCE SCORING: ASSIGN exact confidence using this scale:
@@ -229,9 +230,8 @@ CRITICAL CATEGORIZATION RULES YOU MUST FOLLOW:
    - WRITE maximum two sentences
    - EXPLAIN why this particular category was chosen
    - USE Russian language
-   - MAINTAIN single-line format (no line breaks)
 
-ENFORCE THESE FIELD CONSTRAINTS:
+ENFORCE THESE FIELD CONSTRAINTS OF JSON:
 - category: MUST be exactly one of: {", ".join([f'"{item}"' for item in categories_list])}
 - confidence: MUST be a float between 0.00 and 1.00 with exactly two decimals
 - reasoning: MUST NOT exceed two sentences; MUST be one line; MUST be in Russian
@@ -240,15 +240,9 @@ NEVER:
 - Add explanatory text outside JSON
 - Include markdown formatting or code fences
 - Output commentary or additional text
-- Use categories outside the predefined list
 - Respond with invalid JSON
 
-ALWAYS:
-- Output pure single-line JSON only
-- Ensure JSON is parseable by standard parsers
-- Select from predefined categories exclusively
-- Provide confidence score with exactly two decimals
-- Keep reasoning concise and in Russian"""
+"""
 
     return prompt
 
