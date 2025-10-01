@@ -54,8 +54,8 @@ llm = GigaChatClient()
 
 # Model parameters optimized for structured output
 params: dict[str, Any] = {
-    # "model": "GigaChat-2-Pro",
-    "model": "GigaChat",
+    "model": "GigaChat-2-Pro",
+    # "model": "GigaChat",
     # "temperature": 0.1,  # Low temperature for consistent categorization
     # "top_p": 0.95,
     "stream": False,

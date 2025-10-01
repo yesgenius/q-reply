@@ -78,8 +78,8 @@ COL_CATEGORY_NAME = 1  # Column A
 COL_CATEGORY_DESC = 2  # Column B
 
 # Search configuration
-TOP_K_SIMILAR = 5  # Number of similar questions to retrieve
-SIMILARITY_THRESHOLD = 0.15  # Minimum cosine similarity
+TOP_K_SIMILAR = 3  # Number of similar questions to retrieve
+SIMILARITY_THRESHOLD = 0.8  # Minimum cosine similarity
 CATEGORY_SEARCH_MODE = CategorySearchMode.WITHOUT_CATEGORY  # How to use categories in search
 
 # Embedding configuration
@@ -98,7 +98,7 @@ LOG_LEVEL = logging.INFO
 
 # Processing configuration
 START_ROW = 2  # Skip header row
-SAVE_FREQUENCY = 3  # Save file every N processed rows
+SAVE_FREQUENCY = 5  # Save file every N processed rows
 
 # Resume configuration
 RESUME_FILE = Path(".answer_generator_resume.json")  # Hidden file for resume state
