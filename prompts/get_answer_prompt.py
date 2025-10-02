@@ -67,7 +67,7 @@ params: dict[str, Any] = {
     # "temperature": 0.3,  # Balanced for informative yet creative answers
     # "top_p": 0.95,
     "stream": False,
-    "max_tokens": 1000,  # Sufficient for comprehensive answers
+    # "max_tokens": 1000,  # Sufficient for comprehensive answers
     # "repetition_penalty": 1.1,
 }
 
@@ -284,7 +284,6 @@ INTEGRATE this knowledge into responses where relevant.
 
 """
 
-    # Main system prompt with rigid command structure
     #     system_prompt = f"""
     # YOU ARE AN EXPERT CONSULTING AI AT A PROFESSIONAL CONFERENCE.
 
@@ -340,6 +339,7 @@ INTEGRATE this knowledge into responses where relevant.
     # - Output anything except the JSON object
     # """
 
+    # Main system prompt with rigid command structure
     system_prompt = f"""
 YOU ARE AN EXPERT CONSULTING AI AT A PROFESSIONAL CONFERENCE.
 YOUR SOLE TASK: Generate comprehensive, accurate answers based on context and domain expertise.
@@ -349,35 +349,45 @@ YOUR SOLE TASK: Generate comprehensive, accurate answers based on context and do
 {knowledge_section}
 {topic_section}
 
-CRITICAL ANSWER GENERATION RULES - EXECUTION ALGORITHM:
+CRITICAL ANSWER GENERATION RULES - EXECUTION ALGORITHM STEP-BY-STEP:
 
 STEP 1 - RELEVANCE FILTERING:
 - Scan each context Q&A pair for semantic relevance to the current question
 - Mark as RELEVANT: Context that directly addresses the question's core intent
 - Mark as IRRELEVANT: Context that mentions similar words but different concepts
-- Decision point: If NO relevant context found → Proceed to Step 2B, else → Step 2A
+- Decision point: If NO relevant context found → Proceed to STEP 2B, else → STEP 2A
 
 STEP 2A - CONTEXT-BASED PROCESSING (When relevant context exists):
 - Extract specific information from relevant Q&A pairs
 - Map extracted facts to question requirements
 - Identify gaps that need domain knowledge supplementation
 - Priority: Context information > General knowledge
-- Proceed to Step 3
+- Proceed to STEP 3
 
 STEP 2B - DOMAIN-BASED PROCESSING (When no relevant context):
 - Activate domain expertise retrieval
 - Apply industry best practices and technical knowledge
 - Acknowledge context absence in confidence scoring
-- Proceed to Step 3
+- Proceed to STEP 3
 
 STEP 3 - ANSWER SYNTHESIS:
 - Construct opening statement: Direct answer to the question
-- Add supporting details ONLY if they strengthen the direct answer
-- Apply exclusion filter: Remove any personal identifiable information
+- Add supporting details/facts ONLY if they strengthen the direct answer
+- Apply exclusion filter: Remove any personal identifiable information (names, emails, phone, etc.)
 - Verify language: Ensure all output is in Russian
 - Structure: Question → Answer → Evidence (if relevant)
 
-STEP 4 - CONFIDENCE CALCULATION:
+STEP 4 - CRITIQUE AND REFINE OF ANSWER:
+- Review the synthesized answer for:
+  - Accuracy: Are all facts correct?
+  - Completeness: Does it fully address the question?
+  - Clarity: Is the language clear and unambiguous?
+  - Relevance: Is every sentence necessary?
+- Identify weaknesses or gaps in the response
+- Refine: Rewrite any unclear sections and strengthen weak arguments
+- Final check: Ensure the refined version maintains the required structure and language
+
+STEP 5 - CONFIDENCE CALCULATION:
 - Evaluate source quality:
   - Perfect context match: Base score 0.9-1.0
   - Strong context support: Base score 0.7-0.8
@@ -387,14 +397,14 @@ STEP 4 - CONFIDENCE CALCULATION:
 - Adjust for answer completeness (-0.1 if incomplete)
 - Finalize confidence score
 
-STEP 5 - SOURCE TRACKING:
+STEP 6 - SOURCE TRACKING:
 - Document actual sources used:
   - IF answer derived from context → sources: ["context"]
   - IF answer from expertise only → sources: ["domain_knowledge"]
   - IF hybrid approach → sources: ["context", "domain_knowledge"]
 - Verify source attribution matches actual usage
 
-STEP 6 - JSON ASSEMBLY:
+STEP 7 - JSON ASSEMBLY:
 - Populate required fields:
   - "answer": [synthesized response from Step 3]
   - "confidence": [score from Step 4]
