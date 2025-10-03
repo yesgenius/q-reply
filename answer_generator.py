@@ -262,21 +262,31 @@ class AnswerGenerator:
         return None
 
     def load_categories_from_qa(self) -> dict[str, str]:
-        """Load category dictionary from QA.xlsx if available.
+        """Load category dictionary from QA.xlsx file.
+
+        Reads category names and descriptions from the CATEGORY sheet,
+        validating data completeness and handling edge cases gracefully.
 
         Returns:
-            Dictionary mapping category names to descriptions, or empty dict.
+            dict[str, str]: Mapping of category names to descriptions.
+                Empty dict if file/sheet not found or no valid categories.
+
+        Note:
+            Expects data starting from row 2 (row 1 is headers).
+            Requires both name and description for valid category.
         """
         if not INPUT_FILE_QA.exists():
             logger.info(f"File {INPUT_FILE_QA} not found, proceeding without categories")
             return {}
 
         try:
-            wb = openpyxl.load_workbook(INPUT_FILE_QA, read_only=True)
+            # Open with data_only to get calculated values, not formulas
+            wb = openpyxl.load_workbook(INPUT_FILE_QA, read_only=True, data_only=True)
 
             if SHEET_CATEGORY not in wb.sheetnames:
                 logger.info(
-                    f"Sheet '{SHEET_CATEGORY}' not found in {INPUT_FILE_QA}, proceeding without categories"
+                    f"Sheet '{SHEET_CATEGORY}' not found in {INPUT_FILE_QA}, "
+                    "proceeding without categories"
                 )
                 wb.close()
                 return {}
@@ -284,36 +294,71 @@ class AnswerGenerator:
             sheet_category = wb[SHEET_CATEGORY]
             categories = {}
 
-            for row_idx in range(START_ROW, sheet_category.max_row + 1):
-                category_name = sheet_category.cell(row=row_idx, column=COL_CATEGORY_NAME).value
-                category_desc = sheet_category.cell(row=row_idx, column=COL_CATEGORY_DESC).value
+            # Track statistics for logging
+            row_count = 0
+            skipped_empty = 0
+            skipped_incomplete = 0
 
-                # Skip empty rows
+            # Iterate through rows starting from START_ROW
+            # Only read first 2 columns (name and description)
+            for row in sheet_category.iter_rows(min_row=START_ROW, max_col=2, values_only=True):
+                row_count += 1
+
+                # Handle rows with less than 2 columns
+                if len(row) < 2:
+                    category_name = row[0] if row else None
+                    category_desc = None
+                else:
+                    category_name, category_desc = row[0], row[1]
+
+                # Skip completely empty rows
                 if category_name is None and category_desc is None:
+                    skipped_empty += 1
                     continue
 
-                # Validate completeness
+                # Validate data completeness
                 if category_name is None or category_desc is None:
-                    logger.error(
-                        f"Incomplete category data at row {row_idx}. "
-                        f"Name: {category_name}, Description: {category_desc}"
+                    skipped_incomplete += 1
+                    logger.warning(
+                        f"Incomplete category at row {START_ROW + row_count - 1}: "
+                        f"name={category_name}, desc={category_desc}"
                     )
-                    wb.close()
-                    raise ValueError("All categories must have both name and description")
+                    continue
 
-                categories[str(category_name).strip()] = str(category_desc).strip()
+                # Clean and store valid category
+                name_clean = str(category_name).strip()
+                desc_clean = str(category_desc).strip()
+
+                # Skip if cleaned values are empty
+                if not name_clean or not desc_clean:
+                    skipped_incomplete += 1
+                    continue
+
+                categories[name_clean] = desc_clean
 
             wb.close()
 
+            # Log summary
             if categories:
-                logger.info(f"Loaded {len(categories)} categories from {INPUT_FILE_QA}")
+                logger.info(
+                    f"Loaded {len(categories)} categories from {INPUT_FILE_QA} "
+                    f"(examined {row_count} rows, skipped {skipped_empty} empty, "
+                    f"{skipped_incomplete} incomplete)"
+                )
+                logger.debug(f"Categories: {list(categories.keys())}")
             else:
-                logger.info("No categories found in CATEGORY sheet")
+                logger.info(
+                    f"No valid categories found in CATEGORY sheet (examined {row_count} rows)"
+                )
 
             return categories
 
+        except PermissionError:
+            logger.error(f"Cannot access {INPUT_FILE_QA} - file may be open in Excel")
+            return {}
         except Exception as e:
             logger.error(f"Error loading categories: {e}")
+            logger.debug("Exception details:", exc_info=True)
             return {}
 
     def create_log_params_sheet(self, wb: Workbook) -> None:
