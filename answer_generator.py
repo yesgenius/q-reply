@@ -816,13 +816,13 @@ class AnswerGenerator:
             return []
 
     def generate_answer_with_retry(
-        self, question: str, qa_pairs: list[dict[str, str]]
+        self, question: str, qa_pairs: list[dict[str, Any]]
     ) -> dict[str, Any] | None:
         """Generate answer with retry logic on errors.
 
         Args:
             question: The question to answer.
-            qa_pairs: Context Q&A pairs.
+            qa_pairs: Context Q&A pairs with similarity scores.
 
         Returns:
             Answer result dictionary or None on failure.
@@ -913,23 +913,23 @@ class AnswerGenerator:
             # Step 2: Search similar questions
             similar_questions = self.search_similar_questions(question_str, selected_category)
 
-            if not similar_questions:
-                logger.warning(f"No similar questions found for row {row_idx}")
-                # Write empty result
-                sheet_q.cell(row=row_idx, column=COL_Q_ANSWER, value="No similar questions found")
-                sheet_q.cell(row=row_idx, column=COL_Q_CONFIDENCE, value=0.0)
-                sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value="[]")
-                return True
+            # Log search results
+            if similar_questions:
+                logger.info(f"Found {len(similar_questions)} similar questions")
+            else:
+                logger.info("No similar questions found, will use domain knowledge only")
 
-            logger.info(f"Found {len(similar_questions)} similar questions")
-
-            # Step 3: Prepare context for answer generation
+            # Step 3: Prepare context for answer generation with similarity scores
             qa_pairs = [
-                {"question": result["question"], "answer": result["answer"]}
+                {
+                    "question": result["question"],
+                    "answer": result["answer"],
+                    "similarity": result.get("similarity", 0.0),  # Include similarity score
+                }
                 for result in similar_questions
             ]
 
-            # Step 4: Generate answer with retry
+            # Step 4: Generate answer with retry (now handles empty qa_pairs)
             answer_result = self.generate_answer_with_retry(question_str, qa_pairs)
 
             if not answer_result:
