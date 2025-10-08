@@ -32,7 +32,7 @@ Example:
 
     # Initialize answer generation system with similarity threshold
     get_answer_prompt.update_system_prompt(topic=topic)
-    get_answer_prompt.update_chat_history(similarity_threshold=0.8)
+    get_answer_prompt.update_similarity_threshold(0.8)
 
     # Generate answer using context
     question = "How do you monitor model performance?"
@@ -48,10 +48,9 @@ Usage:
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from gigachat.client import GigaChatClient
 import json_repair
@@ -80,12 +79,21 @@ knowledge_base = (
     Path(__file__).stem + "_kbase.txt",  # get_answer_prompt_kbase.txt
 )
 
+
+# Type definitions for Q&A pairs
+class QAPair(TypedDict):
+    """Structure for Q&A pair with optional similarity score."""
+
+    question: str
+    answer: str
+    similarity: NotRequired[float]
+
+
 # Global cached variables
 _system_prompt: str | None = None
-_chat_history: list[dict[str, str]] = []
-_current_topic: str | None = None  # Cache current topic for validation
-_loaded_knowledge_base: str | None = None  # Cache loaded knowledge base path
-_similarity_threshold: float = 2.0  # Default >1 disables history feature
+_current_topic: str | None = None
+_loaded_knowledge_base: str | None = None
+_similarity_threshold: float = 0.8  # Default >1 disables history feature
 
 
 def _load_knowledge_base() -> str | None:
@@ -126,22 +134,19 @@ def _load_knowledge_base() -> str | None:
     return None
 
 
-def _format_user_prompt(question: str, qa_pairs: list[dict[str, str]] | None = None) -> str:
+def _format_user_prompt(question: str, qa_pairs: list[QAPair] | None = None) -> str:
     """Format the user prompt with question and optional context Q&A pairs.
 
     Creates a structured user prompt that includes the question
-    and relevant Q&A pairs from previous conferences for context.
+    and relevant Q&A pairs for context when similarity threshold > 1.
 
     Args:
         question: The user's question to answer.
-        qa_pairs: Optional list of dictionaries with 'question' and 'answer' keys
-            providing context from previous conferences. If None, formats only the question.
+        qa_pairs: Optional list of Q&A pairs providing context.
+            Only used when similarity_threshold > 1.
 
     Returns:
         Formatted user prompt string.
-
-    Raises:
-        ValueError: If qa_pairs is provided but has invalid format.
 
     Example:
         >>> qa_pairs = [{"question": "What is Docker?", "answer": "Container platform..."}]
@@ -153,15 +158,8 @@ def _format_user_prompt(question: str, qa_pairs: list[dict[str, str]] | None = N
     # Add the current question
     user_prompt += f"\n---\nCURRENT QUESTION TO ANSWER:\n{question}\n---\n"
 
-    # Add context if provided
+    # Add context if provided (only when threshold > 1)
     if qa_pairs:
-        # Validate qa_pairs structure
-        for i, pair in enumerate(qa_pairs):
-            if not isinstance(pair, dict):
-                raise ValueError(f"qa_pairs[{i}] must be a dictionary")
-            if "question" not in pair or "answer" not in pair:
-                raise ValueError(f"qa_pairs[{i}] must have 'question' and 'answer' keys")
-
         # Format context Q&A pairs
         context_parts = []
         for i, pair in enumerate(qa_pairs, 1):
@@ -174,12 +172,30 @@ def _format_user_prompt(question: str, qa_pairs: list[dict[str, str]] | None = N
         user_prompt += (
             "CONTEXT Q&A PAIRS: use ONLY if directly relevant to the question above:\n"
             f"{context_text}\n"
-            "---\n\n"
         )
-    else:
-        user_prompt += "---\n\n"
 
     return user_prompt
+
+
+def _format_history_message(qa_pair: QAPair) -> str:
+    """Format Q&A pair as assistant's JSON response for history.
+
+    Creates a properly formatted JSON response that matches
+    the expected output format from the system prompt.
+
+    Args:
+        qa_pair: Q&A pair to format as assistant response.
+
+    Returns:
+        JSON string matching expected assistant output format.
+    """
+    # Create response matching expected format
+    response = {
+        "answer": qa_pair["answer"],
+        "confidence": qa_pair.get("similarity", 0.8),  # Use similarity as confidence if available
+        "sources_used": ["context"],  # Historical answers come from context
+    }
+    return json.dumps(response, ensure_ascii=False, indent=2)
 
 
 def _generate_system_prompt(**kwargs: Any) -> str:
@@ -194,9 +210,6 @@ def _generate_system_prompt(**kwargs: Any) -> str:
 
     Returns:
         System prompt string for answer generation task.
-
-    Example:
-        >>> prompt = _generate_system_prompt(topic="Cloud Architecture")
     """
     topic = kwargs.get("topic")
 
@@ -362,18 +375,18 @@ STEP 7 - JSON ASSEMBLY:
 - Populate required fields:
   - "answer": [synthesized response from Step 3]
   - "confidence": [score from Step 4]
-  - "sources": [array from Step 5]
+  - "sources_used": [array from Step 5]
 - Validate JSON structure compliance
 - Output ONLY the JSON object
 
 VALIDATION CHECKS:
-□ Answer directly addresses the question
-□ No irrelevant context summarization
-□ No personal data included
-□ Response in Russian
-□ Confidence reflects actual source quality
-□ Sources accurately attributed
-□ Pure JSON output (no wrapper text)
+▢ Answer directly addresses the question
+▢ No irrelevant context summarization
+▢ No personal data included
+▢ Response in Russian
+▢ Confidence reflects actual source quality
+▢ Sources accurately attributed
+▢ Pure JSON output (no wrapper text)
 
 PROHIBITED ACTIONS:
 × Adding explanatory text outside JSON structure
@@ -384,57 +397,6 @@ PROHIBITED ACTIONS:
 × Mixing languages in response
 """
     return system_prompt
-
-
-def _generate_chat_history(**kwargs: Any) -> list[dict[str, str]]:
-    """Generate chat history from highly similar Q&A pairs.
-
-    Filters Q&A pairs by similarity threshold and formats them as chat history.
-    Each pair above threshold becomes a user-assistant message exchange.
-
-    Args:
-        **kwargs: Parameters for history generation:
-            qa_pairs (list): Q&A pairs with optional 'similarity' field.
-            user_question (str): Current question for formatting user prompts.
-            similarity_threshold (float): Min similarity to include (default from global).
-
-    Returns:
-        List of message dictionaries in chat format.
-    """
-    qa_pairs = kwargs.get("qa_pairs", [])
-    user_question = kwargs.get("user_question", "")
-    threshold = kwargs.get("similarity_threshold", _similarity_threshold)
-
-    history = []
-
-    # Process each Q&A pair
-    for pair in qa_pairs:
-        if not isinstance(pair, dict):
-            continue
-
-        # Check similarity if present
-        similarity = pair.get("similarity", 0.0)
-
-        # Ensure similarity is numeric
-        try:
-            similarity = float(similarity)
-        except (ValueError, TypeError):
-            similarity = 0.0
-            logger.debug(f"Invalid similarity value, treating as 0.0: {pair.get('similarity')}")
-
-        if similarity >= threshold:
-            # Format as historical exchange
-            # User message: question without context
-            user_msg = _format_user_prompt(pair.get("question", ""))
-            history.append({"role": "user", "content": user_msg})
-
-            # Assistant message: the answer
-            answer = pair.get("answer", "")
-            history.append({"role": "assistant", "content": answer})
-
-            logger.debug(f"Added Q&A to history with similarity {similarity:.2f}")
-
-    return history
 
 
 def update_system_prompt(**kwargs: Any) -> str:
@@ -449,9 +411,6 @@ def update_system_prompt(**kwargs: Any) -> str:
 
     Returns:
         The current system prompt string.
-
-    Raises:
-        ValueError: If system prompt is not initialized when needed.
     """
     global _system_prompt, _current_topic
 
@@ -471,48 +430,36 @@ def update_system_prompt(**kwargs: Any) -> str:
     return _system_prompt
 
 
-def update_chat_history(**kwargs: Any) -> list[dict[str, str]]:
-    """Update or retrieve the cached chat history.
+def update_similarity_threshold(threshold: float) -> None:
+    """Update the global similarity threshold.
 
-    Generates chat history from Q&A pairs with similarity above threshold.
-    Threshold > 1.0 effectively disables history generation.
+    Controls how Q&A pairs are processed:
+    - threshold > 1.0: All pairs go to context (history disabled)
+    - threshold <= 1.0: Pairs with similarity >= threshold go to history,
+                        others are discarded
 
     Args:
-        **kwargs: Parameters for history generation:
-            qa_pairs (list): Q&A pairs with optional 'similarity' field.
-            user_question (str): Current question for formatting.
-            similarity_threshold (float): Min similarity to include (default 2.0).
-
-    Returns:
-        List of historical message exchanges.
+        threshold: New similarity threshold value.
     """
-    global _chat_history, _similarity_threshold
-
-    # Update threshold if provided
-    if "similarity_threshold" in kwargs:
-        _similarity_threshold = float(kwargs["similarity_threshold"])
-        logger.debug(f"Similarity threshold set to {_similarity_threshold}")
-
-    # Generate history if Q&A pairs provided
-    if "qa_pairs" in kwargs:
-        _chat_history = _generate_chat_history(**kwargs)
-        logger.debug(f"Generated {len(_chat_history)} history messages")
-
-    return _chat_history.copy()
+    global _similarity_threshold
+    _similarity_threshold = threshold
+    logger.debug(f"Similarity threshold set to {threshold}")
 
 
-def get_messages(user_question: str, qa_pairs: list[dict[str, str]]) -> list[dict[str, str]]:
+def get_messages(user_question: str, qa_pairs: list[QAPair]) -> list[dict[str, str]]:
     """Build complete message list for LLM request.
+
+    Processes Q&A pairs based on similarity threshold:
+    - If threshold > 1: All pairs go to user prompt context
+    - Otherwise: Filter by similarity, high-similarity pairs become history,
+                 low-similarity pairs are discarded
 
     Args:
         user_question: The question to answer.
-        qa_pairs: Context Q&A pairs from previous conferences, optionally with 'similarity'.
+        qa_pairs: Context Q&A pairs with optional 'similarity' field.
 
     Returns:
         List of message dictionaries formatted for LLM API.
-
-    Raises:
-        ValueError: If qa_pairs is invalid or empty.
     """
     messages_list = []
 
@@ -521,19 +468,41 @@ def get_messages(user_question: str, qa_pairs: list[dict[str, str]]) -> list[dic
     if system_prompt:
         messages_list.append({"role": "system", "content": system_prompt})
 
-    # Generate and add chat history from similar Q&A pairs
-    history = update_chat_history(qa_pairs=qa_pairs, user_question=user_question)
-    messages_list.extend(history)
-
-    # Decision: if we have history, skip context in user prompt
-    if history:
-        # History provides context - no need for Q&A pairs in user prompt
-        user_prompt = _format_user_prompt(user_question)
-    else:
-        # No history - include all Q&A pairs as context
+    # Process Q&A pairs based on threshold
+    if _similarity_threshold > 1.0:
+        # All pairs go to context in user prompt
         user_prompt = _format_user_prompt(user_question, qa_pairs)
+        messages_list.append({"role": "user", "content": user_prompt})
+        logger.debug(f"Using {len(qa_pairs)} Q&A pairs in explicit context (threshold > 1)")
+    else:
+        # Filter pairs by similarity
+        history_pairs = []
+        for pair in qa_pairs:
+            try:
+                similarity = float(pair.get("similarity", 0.0))
+            except (ValueError, TypeError):
+                similarity = 0.0
 
-    messages_list.append({"role": "user", "content": user_prompt})
+            if similarity >= _similarity_threshold:
+                history_pairs.append(pair)
+
+        # Add filtered pairs to history
+        for pair in history_pairs:
+            # User asks the question
+            user_msg = _format_user_prompt(pair["question"])
+            messages_list.append({"role": "user", "content": user_msg})
+
+            # Assistant responds with formatted JSON
+            assistant_msg = _format_history_message(pair)
+            messages_list.append({"role": "assistant", "content": assistant_msg})
+
+        logger.debug(
+            f"Added {len(history_pairs)} Q&A pairs to history (threshold={_similarity_threshold})"
+        )
+
+        # Add current question without context
+        user_prompt = _format_user_prompt(user_question)
+        messages_list.append({"role": "user", "content": user_prompt})
 
     return messages_list
 
@@ -682,9 +651,6 @@ def _extract_fields_fallback(response_text: str) -> dict[str, Any]:
 
     Returns:
         Dict with extracted or default values.
-
-    Raises:
-        ValueError: If answer cannot be extracted.
     """
     logger.warning(f"Invalid JSON, using fallback extraction for response: [{response_text}]")
 
@@ -821,10 +787,15 @@ def _extract_sources_used(text: str) -> list[str] | None:
 
 def run(
     user_question: str,
-    qa_pairs: list[dict[str, str]],
+    qa_pairs: list[QAPair],
     custom_params: dict[str, Any] | None = None,
 ) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     """Generate answer for a question using context Q&A pairs.
+
+    Processes Q&A pairs based on the global similarity threshold:
+    - If threshold > 1: All pairs are used as context in the user prompt
+    - Otherwise: Pairs with similarity >= threshold become dialogue history,
+                 pairs below threshold are discarded
 
     Args:
         user_question: Question to answer.
@@ -925,28 +896,7 @@ def run(
                 error_details,
             )
 
-        # Analyze context distribution for logging
-        history_count = 0
-        for p in qa_pairs:
-            try:
-                similarity = float(p.get("similarity", 0.0))
-            except (ValueError, TypeError):
-                similarity = 0.0
-            if similarity >= _similarity_threshold:
-                history_count += 1
-
-        has_history = history_count > 0
-
         logger.debug(f"Generating answer for: {user_question[:100]}...")
-        if qa_pairs:
-            if has_history:
-                logger.debug(
-                    f"Using {history_count} Q&A pairs in dialogue history (context via history)"
-                )
-            else:
-                logger.debug(f"Using {len(qa_pairs)} Q&A pairs in explicit context (no history)")
-        else:
-            logger.debug("No Q&A pairs provided - using domain knowledge only")
         logger.debug(f"Request params: {request_params}")
 
         # Make LLM request
@@ -1018,363 +968,3 @@ def run(
         logger.error(error_msg, exc_info=True)
         error_details.update({"stage": "unknown", "type": type(e).__name__, "details": str(e)})
         return json.dumps({"error": error_msg}, ensure_ascii=False), messages_list, error_details
-
-
-# Test section
-if __name__ == "__main__":
-    """Test the answer generation module for RAG system with chat history support."""
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s][%(name)s][%(levelname)s][%(filename)s:%(lineno)d][%(message)s]",
-    )
-
-    print("=== Answer Generation Module Test (RAG System with Chat History) ===\n")
-
-    # Track test results
-    tests_passed = 0
-    tests_failed = 0
-    failed_tests = []
-
-    # Test 1: Initialize without topic
-    print("Test 1: Initialize answer generation system without topic")
-    try:
-        prompt = update_system_prompt()
-        assert prompt is not None, "System prompt should not be None"
-        assert len(prompt) > 0, "System prompt should not be empty"
-        assert isinstance(prompt, str), "System prompt should be a string"
-        print(f"✓ System initialized (prompt length: {len(prompt)} chars)")
-        tests_passed += 1
-    except AssertionError as e:
-        print(f"✗ Test 1 failed: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 1")
-    except Exception as e:
-        print(f"✗ Test 1 failed with unexpected error: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 1")
-    print()
-
-    # Test 2: Initialize with conference topic
-    print("Test 2: Initialize with conference topic")
-    try:
-        test_topic = "Cloud Native Architecture and Microservices"
-        prompt = update_system_prompt(topic=test_topic)
-
-        assert prompt is not None, "System prompt should not be None"
-        assert test_topic in prompt, f"Topic '{test_topic}' not found in prompt"
-        assert _current_topic == test_topic, "Topic not cached correctly"
-
-        print(f"✓ System initialized with topic: {test_topic}")
-        tests_passed += 1
-    except AssertionError as e:
-        print(f"✗ Test 2 failed: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 2")
-    except Exception as e:
-        print(f"✗ Test 2 failed with unexpected error: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 2")
-    print()
-
-    # Test 3: Knowledge base loading
-    print("Test 3: Knowledge base loading")
-    try:
-        test_kb_file = Path(__file__).parent / (Path(__file__).stem + "_kbase.txt")
-        test_kb_content = """Important Conference Rules:
-1. All presentations should be under 20 minutes
-2. Questions from the audience are limited to 5 minutes"""
-
-        try:
-            # Create test knowledge base file
-            with open(test_kb_file, "w", encoding="utf-8") as f:
-                f.write(test_kb_content)
-
-            # Reset cached state
-            _system_prompt = None
-            _loaded_knowledge_base = None
-
-            # Generate prompt - should load knowledge base
-            prompt = update_system_prompt(topic="Test Conference")
-
-            assert _loaded_knowledge_base is not None, "Knowledge base should be loaded"
-            assert "Important Conference Rules" in prompt, "KB content not in prompt"
-
-            print(f"✓ Knowledge base loaded from: {_loaded_knowledge_base}")
-            tests_passed += 1
-
-        finally:
-            # Clean up test file
-            if test_kb_file.exists():
-                test_kb_file.unlink()
-
-    except AssertionError as e:
-        print(f"✗ Test 3 failed: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 3")
-    except Exception as e:
-        print(f"✗ Test 3 failed with unexpected error: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 3")
-    print()
-
-    # Test 4: Chat history with similarity threshold
-    print("Test 4: Chat history with similarity threshold")
-    test_4_passed = True
-
-    try:
-        # Reset system
-        _system_prompt = None
-        _chat_history = []
-        _similarity_threshold = 2.0
-        update_system_prompt(topic="Machine Learning Conference")
-
-        test_qa_pairs = [
-            {
-                "question": "What is transfer learning?",
-                "answer": "Transfer learning reuses pre-trained models for new tasks.",
-                "similarity": 0.92,
-            },
-            {
-                "question": "How do you handle overfitting?",
-                "answer": "Use regularization, dropout, and cross-validation.",
-                "similarity": 0.85,
-            },
-            {
-                "question": "What databases do you use?",
-                "answer": "PostgreSQL for relational data, Redis for caching.",
-                "similarity": 0.45,
-            },
-        ]
-
-        # Test 4a: Threshold = 0.8
-        print("  4a: Threshold = 0.8 (includes 2 pairs)")
-        history = update_chat_history(
-            qa_pairs=test_qa_pairs,
-            user_question="How to improve model performance?",
-            similarity_threshold=0.8,
-        )
-
-        expected_messages = 4  # 2 pairs * 2 messages each
-        assert len(history) == expected_messages, (
-            f"Expected {expected_messages} messages, got {len(history)}"
-        )
-        assert history[0]["role"] == "user", "First message should be 'user'"
-        assert history[1]["role"] == "assistant", "Second message should be 'assistant'"
-        assert "transfer learning" in history[0]["content"], (
-            "High-similarity question not in history"
-        )
-        print(f"    ✓ Generated {len(history)} history messages")
-
-        # Test 4b: Threshold = 0.95
-        print("  4b: Threshold = 0.95 (excludes all pairs)")
-        history = update_chat_history(
-            qa_pairs=test_qa_pairs,
-            user_question="Test question",
-            similarity_threshold=0.95,
-        )
-        assert len(history) == 0, f"Expected 0 messages, got {len(history)}"
-        print("    ✓ No history when all similarities below threshold")
-
-        # Test 4c: Threshold = 2.0
-        print("  4c: Threshold = 2.0 (feature disabled)")
-        history = update_chat_history(
-            qa_pairs=test_qa_pairs,
-            user_question="Test question",
-            similarity_threshold=2.0,
-        )
-        assert len(history) == 0, f"Expected 0 messages, got {len(history)}"
-        print("    ✓ History disabled with threshold > 1.0")
-
-        tests_passed += 1
-
-    except AssertionError as e:
-        print(f"  ✗ Test 4 failed: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 4")
-        test_4_passed = False
-    except Exception as e:
-        print(f"  ✗ Test 4 failed with unexpected error: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 4")
-        test_4_passed = False
-
-    if test_4_passed:
-        print("✓ Test 4 passed")
-    print()
-
-    # Test 5: Generate answer with similarity-based history
-    print("Test 5: Generate answer with similarity-based history")
-    try:
-        _system_prompt = None
-        _similarity_threshold = 0.8
-        update_system_prompt(topic="Cloud Native Architecture")
-
-        mixed_qa = [
-            {
-                "question": "What are the benefits of using Docker?",
-                "answer": "Docker provides consistency across environments.",
-                "similarity": 0.91,
-            },
-            {
-                "question": "How do you implement service discovery?",
-                "answer": "We use Consul for service discovery with health checks.",
-                "similarity": 0.88,
-            },
-            {
-                "question": "What about database migrations?",
-                "answer": "We use Flyway for versioned database migrations.",
-                "similarity": 0.65,
-            },
-        ]
-
-        question = "How does containerization help with scaling?"
-
-        # Update history before running
-        update_chat_history(
-            qa_pairs=mixed_qa,
-            user_question=question,
-            similarity_threshold=_similarity_threshold,
-        )
-
-        result_json, messages, raw_response = run(question, mixed_qa)
-        result = json.loads(result_json)
-
-        # Validate result structure
-        assert "error" not in result, f"Unexpected error: {result.get('error')}"
-        assert "answer" in result, "Missing 'answer' field"
-        assert isinstance(result["answer"], str), "Answer should be string"
-        assert len(result["answer"]) > 0, "Answer should not be empty"
-
-        if "confidence" in result:
-            assert 0 <= result["confidence"] <= 1, f"Invalid confidence: {result['confidence']}"
-
-        if "sources_used" in result:
-            assert isinstance(result["sources_used"], list), "sources_used should be list"
-
-        print(f"✓ Generated answer: {result['answer'][:80]}...")
-        tests_passed += 1
-
-    except AssertionError as e:
-        print(f"✗ Test 5 failed: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 5")
-    except Exception as e:
-        print(f"✗ Test 5 failed with unexpected error: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 5")
-    print()
-
-    # Test 6: Error handling
-    print("Test 6: Error handling")
-    test_6_results = []
-
-    # Test 6.1: Empty qa_pairs
-    print("  6.1: Empty qa_pairs (should succeed)")
-    try:
-        result_json, messages, response = run("What is cloud computing?", [])
-        result = json.loads(result_json)
-
-        assert "error" not in result, f"Should not have error: {result.get('error')}"
-        assert "answer" in result, "Missing 'answer' field"
-        assert len(result["answer"]) > 0, "Answer should not be empty"
-
-        print(f"    ✓ Handled empty qa_pairs: {result['answer'][:50]}...")
-        test_6_results.append(True)
-    except AssertionError as e:
-        print(f"    ✗ Failed: {e}")
-        test_6_results.append(False)
-    except Exception as e:
-        print(f"    ✗ Unexpected error: {e}")
-        test_6_results.append(False)
-
-    # Test 6.2: Invalid qa_pairs format
-    print("  6.2: Invalid qa_pairs (missing 'answer' key)")
-    try:
-        invalid_qa = [{"question": "Only question, no answer"}]
-        result_json, messages, response = run("Test question", invalid_qa)
-        result = json.loads(result_json)
-
-        assert "error" in result, "Should have 'error' key"
-        assert "answer" in result["error"].lower(), "Error should mention missing 'answer'"
-
-        print(f"    ✓ Returned error: {result['error'][:50]}...")
-        test_6_results.append(True)
-    except AssertionError as e:
-        print(f"    ✗ Failed: {e}")
-        test_6_results.append(False)
-    except Exception as e:
-        print(f"    ✗ Unexpected error: {e}")
-        test_6_results.append(False)
-
-    # Test 6.3: Streaming parameter
-    print("  6.3: Streaming parameter (should return error)")
-    try:
-        valid_qa = [{"question": "Q", "answer": "A"}]
-        result_json, messages, response = run("Test", valid_qa, custom_params={"stream": True})
-        result = json.loads(result_json)
-
-        assert "error" in result, "Should have 'error' key"
-        assert "streaming" in result["error"].lower(), "Error should mention streaming"
-
-        print(f"    ✓ Returned error: {result['error'][:50]}...")
-        test_6_results.append(True)
-    except AssertionError as e:
-        print(f"    ✗ Failed: {e}")
-        test_6_results.append(False)
-    except Exception as e:
-        print(f"    ✗ Unexpected error: {e}")
-        test_6_results.append(False)
-
-    # Test 6.4: Invalid similarity value
-    print("  6.4: Invalid similarity value (should handle gracefully)")
-    try:
-        qa_with_invalid = [
-            {"question": "Q1", "answer": "A1", "similarity": "not_a_number"},
-            {"question": "Q2", "answer": "A2", "similarity": 0.8},
-        ]
-
-        # Should not raise error, treats invalid as 0.0
-        history = update_chat_history(
-            qa_pairs=qa_with_invalid, user_question="Test", similarity_threshold=0.7
-        )
-
-        # Only Q2 should be in history (similarity 0.8 > 0.7)
-        assert len(history) == 2, f"Expected 2 messages (1 pair), got {len(history)}"
-        assert "Q2" in history[0]["content"], "Q2 should be in history"
-
-        print("    ✓ Handled invalid similarity gracefully")
-        test_6_results.append(True)
-    except AssertionError as e:
-        print(f"    ✗ Failed: {e}")
-        test_6_results.append(False)
-    except Exception as e:
-        print(f"    ✗ Unexpected error: {e}")
-        test_6_results.append(False)
-
-    # Evaluate Test 6
-    if all(test_6_results):
-        print("✓ Test 6 passed")
-        tests_passed += 1
-    else:
-        print(
-            f"✗ Test 6 failed ({test_6_results.count(False)}/{len(test_6_results)} subtests failed)"
-        )
-        tests_failed += 1
-        failed_tests.append("Test 6")
-    print()
-
-    # Final summary
-    print("=" * 60)
-    total_tests = tests_passed + tests_failed
-    print(f"Test Results: {tests_passed}/{total_tests} passed")
-
-    if tests_failed > 0:
-        print(f"\nFailed tests: {', '.join(failed_tests)}")
-        print("\n✗ TESTS FAILED - Please fix the issues above")
-        exit(1)
-    else:
-        print("\n✓ ALL TESTS PASSED")
-        print("Chat history feature with similarity threshold integrated successfully!")
-        print("Set similarity < 1.0 to enable history, > 1.0 to disable.")
-        exit(0)

@@ -79,7 +79,8 @@ COL_CATEGORY_DESC = 2  # Column B
 
 # Search configuration
 TOP_K_SIMILAR = 3  # Number of similar questions to retrieve
-SIMILARITY_THRESHOLD = 0.8  # Minimum cosine similarity
+SIMILARITY_THRESHOLD = 0.8  # Minimum cosine similarity for database search
+ANSWER_SIMILARITY_THRESHOLD = 0.8  # Threshold for get_answer_prompt module
 CATEGORY_SEARCH_MODE = CategorySearchMode.WITHOUT_CATEGORY  # How to use categories in search
 
 # Embedding configuration
@@ -387,7 +388,16 @@ class AnswerGenerator:
         config_params = [
             ("Timestamp", self.timestamp, "Processing start time"),
             ("TOP_K_SIMILAR", TOP_K_SIMILAR, "Number of similar questions to retrieve"),
-            ("SIMILARITY_THRESHOLD", SIMILARITY_THRESHOLD, "Minimum cosine similarity"),
+            (
+                "SIMILARITY_THRESHOLD",
+                SIMILARITY_THRESHOLD,
+                "Minimum cosine similarity for DB search",
+            ),
+            (
+                "ANSWER_SIMILARITY_THRESHOLD",
+                ANSWER_SIMILARITY_THRESHOLD,
+                "Threshold for answer generation module",
+            ),
             (
                 "CATEGORY_SEARCH_MODE",
                 CATEGORY_SEARCH_MODE.value,
@@ -896,11 +906,16 @@ class AnswerGenerator:
             question_preview = question_str[:80] + "..." if len(question_str) > 80 else question_str
             logger.info(f"Processing row {row_idx}: {question_preview}")
 
-            # Step 1: Categorize question (optional) with retry
+            # Step 1: Categorize question only if needed for search
             category_result = None
             selected_category = None
 
-            if self.categories:
+            # Skip categorization if mode is WITHOUT_CATEGORY
+            should_categorize = (
+                self.categories and CATEGORY_SEARCH_MODE != CategorySearchMode.WITHOUT_CATEGORY
+            )
+
+            if should_categorize:
                 category_result = self.categorize_question_with_retry(question_str)
                 if category_result:
                     selected_category = category_result.get("category")
@@ -909,15 +924,21 @@ class AnswerGenerator:
                             f"Categorized as: {selected_category} "
                             f"(confidence: {category_result.get('confidence', 0):.2f})"
                         )
+            elif self.categories:
+                logger.debug("Skipping categorization (mode: WITHOUT_CATEGORY)")
 
             # Step 2: Search similar questions
             similar_questions = self.search_similar_questions(question_str, selected_category)
 
-            # Log search results
-            if similar_questions:
-                logger.info(f"Found {len(similar_questions)} similar questions")
-            else:
-                logger.info("No similar questions found, will use domain knowledge only")
+            if not similar_questions:
+                logger.warning(f"No similar questions found for row {row_idx}")
+                # Write empty result
+                sheet_q.cell(row=row_idx, column=COL_Q_ANSWER, value="No similar questions found")
+                sheet_q.cell(row=row_idx, column=COL_Q_CONFIDENCE, value=0.0)
+                sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value="[]")
+                return True
+
+            logger.info(f"Found {len(similar_questions)} similar questions")
 
             # Step 3: Prepare context for answer generation with similarity scores
             qa_pairs = [
@@ -929,7 +950,7 @@ class AnswerGenerator:
                 for result in similar_questions
             ]
 
-            # Step 4: Generate answer with retry (now handles empty qa_pairs)
+            # Step 4: Generate answer with retry
             answer_result = self.generate_answer_with_retry(question_str, qa_pairs)
 
             if not answer_result:
@@ -1055,6 +1076,7 @@ class AnswerGenerator:
             logger.info("Starting Answer Generator Script")
             logger.info(f"Log Answer: {'ENABLED' if LOG_ANSWER else 'DISABLED'}")
             logger.info(f"Category Search Mode: {CATEGORY_SEARCH_MODE.value}")
+            logger.info(f"Answer Similarity Threshold: {ANSWER_SIMILARITY_THRESHOLD}")
             logger.info(f"Max Retry Attempts (Category): {MAX_RETRY_ATTEMPTS_CATEGORY}")
             logger.info(f"Max Retry Attempts (Answer): {MAX_RETRY_ATTEMPTS_ANSWER}")
             logger.info("=" * 70)
@@ -1121,10 +1143,13 @@ class AnswerGenerator:
             )
             logger.info("Database connected successfully")
 
-            # Step 6: Initialize answer generation system
+            # Step 6: Initialize answer generation system with similarity threshold
             logger.info("Step 6: Initializing answer generation system...")
             get_answer_prompt.update_system_prompt(topic=self.conference_topic)
-            logger.info("Answer generation system initialized")
+            get_answer_prompt.update_similarity_threshold(ANSWER_SIMILARITY_THRESHOLD)
+            logger.info(
+                f"Answer generation system initialized (threshold={ANSWER_SIMILARITY_THRESHOLD})"
+            )
 
             # Step 7: Process questions
             logger.info("Step 7: Processing questions...")

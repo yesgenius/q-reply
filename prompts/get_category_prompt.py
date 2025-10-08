@@ -59,7 +59,7 @@ params: dict[str, Any] = {
     # "temperature": 0.1,  # Low temperature for consistent categorization
     # "top_p": 0.95,
     "stream": False,
-    "max_tokens": 300,  # Sufficient for JSON with reasoning
+    # "max_tokens": 300,  # Sufficient for JSON with reasoning
     # "repetition_penalty": 1.0,
 }
 
