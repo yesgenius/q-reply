@@ -579,7 +579,7 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
                 f"instead of number: {confidence!r}"
             )
 
-        confidence_float = float(confidence)
+        confidence_float = round(float(confidence), 2)
         if not 0 <= confidence_float <= 1:
             raise ValueError(
                 f"json_repair returned 'confidence'={confidence_float} outside valid range [0, 1]"
