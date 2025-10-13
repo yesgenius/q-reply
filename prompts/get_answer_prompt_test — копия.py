@@ -118,11 +118,6 @@ def run_tests() -> None:
         assert len(prompt) > 0, "Prompt is empty"
         assert isinstance(prompt, str), f"Prompt is {type(prompt)}, not str"
 
-        # Check for new field in prompt
-        assert "sources_used_reasoning" in prompt, (
-            "New field 'sources_used_reasoning' not in prompt"
-        )
-
         # Save the system prompt
         init_msg = [{"role": "system", "content": prompt}]
         save_messages(init_msg, "msgs_01_init_basic", test_dir)
@@ -250,7 +245,7 @@ def run_tests() -> None:
         expected = 1 + 4 + 1
         assert len(messages) == expected, f"Expected {expected}, got {len(messages)}"
 
-        # Verify history messages contain JSON responses with new field
+        # Verify history messages contain JSON responses
         for i in range(1, len(messages) - 1):  # Skip system and final user
             if messages[i]["role"] == "assistant":
                 content = messages[i]["content"]
@@ -260,9 +255,6 @@ def run_tests() -> None:
                 assert '"answer"' in content, f"Assistant message {i} should have 'answer' field"
                 assert '"confidence"' in content, (
                     f"Assistant message {i} should have 'confidence' field"
-                )
-                assert '"sources_used_reasoning"' in content, (
-                    f"Assistant message {i} should have 'sources_used_reasoning' field"
                 )
 
         save_messages(messages, "msgs_04a_chat_history_mode", test_dir)
@@ -398,13 +390,6 @@ def run_tests() -> None:
             f"Expected {expected_assistant} assistant messages, got {assistant_count}"
         )
 
-        # Verify all assistant messages have the new field
-        for msg in messages:
-            if msg["role"] == "assistant":
-                assert '"sources_used_reasoning"' in msg["content"], (
-                    "Assistant message should have 'sources_used_reasoning' field"
-                )
-
         print(f"Generated {len(messages)} messages:")
         print(f"  - System: {system_count}")
         print(f"  - User: {user_count}")
@@ -518,7 +503,7 @@ def run_tests() -> None:
         failed_tests.append("Test 7")
     print()
 
-    # Test 8: Context mode persistence
+    # Test 8: Mode persistence
     print("TEST 8: Context mode persistence")
     print("-" * 40)
     try:
@@ -550,237 +535,6 @@ def run_tests() -> None:
         failed_tests.append("Test 8")
     print()
 
-    # Test 9: Parsing JSON response with new field
-    print("TEST 9: JSON response parsing with sources_used_reasoning")
-    print("-" * 40)
-    try:
-        # Test valid JSON with new field
-        valid_json = """
-        {
-            "answer": "Test answer content",
-            "confidence": 0.85,
-            "sources_used": ["context"],
-            "sources_used_reasoning": "Using context from dialogue. Information comes directly from conversation history."
-        }
-        """
-
-        result = get_answer_prompt._parse_json_response(valid_json)
-        assert "sources_used_reasoning" in result, (
-            "Missing 'sources_used_reasoning' in parsed result"
-        )
-        assert isinstance(result["sources_used_reasoning"], str), "Reasoning should be a string"
-        assert len(result["sources_used_reasoning"]) > 0, "Reasoning should not be empty"
-
-        print("      Valid JSON with reasoning parsed correctly")
-
-        # Test fallback extraction for new field
-        malformed = 'answer is "Test", confidence: 0.5, sources_used_reasoning: "Using general knowledge. No relevant context found."'
-        fallback_result = get_answer_prompt._parse_json_response(malformed)
-        assert "sources_used_reasoning" in fallback_result, "Fallback should handle reasoning field"
-
-        print("      Fallback extraction handles reasoning field")
-
-        tests_passed += 1
-    except AssertionError as e:
-        print(f"Failed: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 9")
-    except Exception as e:
-        print(f"Unexpected error: {type(e).__name__}: {e}")
-        tests_failed += 1
-        failed_tests.append("Test 9")
-    print()
-
-    # Test 10: Full run() function with LLM call
-    print("TEST 10: Full run() function with LLM call")
-    print("-" * 40)
-
-    test_10_passed = True
-
-    # Sub-test 10a: With context QA pairs
-    try:
-        print("  10a) run() with context QA pairs")
-
-        # Reset and configure
-        get_answer_prompt._system_prompt = None
-        get_answer_prompt.update_chat_history(True)  # Use chat history mode
-        get_answer_prompt.update_system_prompt(topic="Python Programming")
-
-        # Prepare QA pairs
-        qa_pairs: list[get_answer_prompt.QAPair] = [
-            {
-                "question": "What are Python decorators?",
-                "answer": "Functions that modify other functions.",
-                "similarity": 0.9,
-            },
-            {
-                "question": "How to handle errors in Python?",
-                "answer": "Use try-except blocks with specific exception types.",
-                "similarity": 0.85,
-            },
-        ]
-
-        question = "What is a context manager in Python?"
-
-        print(f"      Calling LLM with question: '{question}'")
-        print(f"      Using {len(qa_pairs)} QA pairs as context")
-
-        # Call run() with real LLM
-        result_json, messages, raw_response = get_answer_prompt.run(
-            user_question=question,
-            qa_pairs=qa_pairs,
-        )
-
-        # Parse result
-        result = json.loads(result_json)
-
-        # Validate response structure
-        assert "error" not in result, f"LLM call failed: {result.get('error')}"
-        assert "answer" in result, "Missing 'answer' field in response"
-        assert "confidence" in result, "Missing 'confidence' field in response"
-        assert "sources_used" in result, "Missing 'sources_used' field in response"
-        assert "sources_used_reasoning" in result, (
-            "Missing 'sources_used_reasoning' field in response"
-        )
-
-        # Validate field types
-        assert isinstance(result["answer"], str), "Answer should be string"
-        assert isinstance(result["confidence"], (int, float)), "Confidence should be number"
-        assert isinstance(result["sources_used"], list), "Sources should be list"
-        assert isinstance(result["sources_used_reasoning"], str), "Reasoning should be string"
-
-        # Validate confidence range
-        assert 0 <= result["confidence"] <= 1, f"Confidence {result['confidence']} out of range"
-
-        # Validate sources_used values
-        valid_sources = {"context", "domain_knowledge"}
-        for source in result["sources_used"]:
-            assert source in valid_sources, f"Invalid source: {source}"
-
-        # Check reasoning format (should have two sentences)
-        reasoning = result["sources_used_reasoning"]
-        # Count sentences by periods followed by space or end
-        sentence_count = len([s for s in reasoning.split(". ") if s])
-
-        # Save result
-        result_file = test_dir / "result_10a_run_with_context.json"
-        result_file.write_text(result_json, encoding="utf-8")
-
-        print("      LLM response received successfully")
-        print(f"      Answer length: {len(result['answer'])} chars")
-        print(f"      Confidence: {result['confidence']}")
-        print(f"      Sources: {result['sources_used']}")
-        print(f"      Reasoning sentences: ~{sentence_count}")
-        print(f"      Result saved to: {result_file.name}")
-
-        # Save messages sent to LLM
-        save_messages(messages, "msgs_10a_run_with_context", test_dir)
-
-    except Exception as e:
-        print(f"      Failed: {e}")
-        test_10_passed = False
-
-    # Sub-test 10b: Without context (domain knowledge only)
-    try:
-        print("  10b) run() without context (domain knowledge only)")
-
-        # Reset for domain-only test
-        get_answer_prompt._system_prompt = None
-        get_answer_prompt.update_chat_history(False)
-        get_answer_prompt.update_system_prompt(topic="Mathematics")
-
-        question = "What is the Pythagorean theorem?"
-
-        print(f"      Calling LLM with question: '{question}'")
-        print("      Using no QA pairs (domain knowledge only)")
-
-        # Call run() with empty QA pairs
-        result_json, messages, raw_response = get_answer_prompt.run(
-            user_question=question,
-            qa_pairs=[],  # Empty context
-        )
-
-        # Parse result
-        result = json.loads(result_json)
-
-        # Validate response
-        assert "error" not in result, f"LLM call failed: {result.get('error')}"
-        assert "sources_used_reasoning" in result, "Missing reasoning field"
-
-        # For domain-only questions, should use domain_knowledge
-        if "domain_knowledge" in result["sources_used"]:
-            print("      Correctly identified as domain knowledge")
-
-        # Save result
-        result_file = test_dir / "result_10b_run_domain_only.json"
-        result_file.write_text(result_json, encoding="utf-8")
-
-        print("      LLM response received successfully")
-        print(f"      Confidence: {result['confidence']}")
-        print(f"      Sources: {result['sources_used']}")
-        print(f"      Result saved to: {result_file.name}")
-
-        # Save messages sent to LLM
-        save_messages(messages, "msgs_10b_run_domain_only", test_dir)
-
-    except Exception as e:
-        print(f"      Failed: {e}")
-        test_10_passed = False
-
-    # Sub-test 10c: Context mode switching with run()
-    try:
-        print("  10c) run() with context mode (not history)")
-
-        # Switch to context mode
-        get_answer_prompt.update_chat_history(False)  # Use context mode, not history
-
-        qa_pairs: list[get_answer_prompt.QAPair] = [
-            {
-                "question": "What is REST API?",
-                "answer": "Architectural style for web services using HTTP.",
-                "similarity": 0.88,
-            }
-        ]
-
-        question = "How to design APIs?"
-
-        print("      Calling LLM in context mode")
-
-        # Call run() in context mode
-        result_json, messages, raw_response = get_answer_prompt.run(
-            user_question=question,
-            qa_pairs=qa_pairs,
-        )
-
-        result = json.loads(result_json)
-
-        # Validate
-        assert "error" not in result, f"LLM call failed: {result.get('error')}"
-        assert "sources_used_reasoning" in result, "Missing reasoning field"
-
-        # Save result
-        result_file = test_dir / "result_10c_run_context_mode.json"
-        result_file.write_text(result_json, encoding="utf-8")
-
-        print("      Context mode run successful")
-        print(f"      Result saved to: {result_file.name}")
-
-        # Save messages sent to LLM
-        save_messages(messages, "msgs_10c_run_context_mode", test_dir)
-
-    except Exception as e:
-        print(f"      Failed: {e}")
-        test_10_passed = False
-
-    if test_10_passed:
-        print("Test 10 passed")
-        tests_passed += 1
-    else:
-        print("Test 10 failed")
-        tests_failed += 1
-        failed_tests.append("Test 10")
-    print()
-
     # Final summary
     print("=" * 60)
     print("SUMMARY")
@@ -790,17 +544,9 @@ def run_tests() -> None:
 
     # List all saved files
     saved_files = sorted(test_dir.glob("msgs_*.txt"))
-    result_files = sorted(test_dir.glob("result_*.json"))
-
     if saved_files:
         print(f"\nGenerated {len(saved_files)} message files:")
         for f in saved_files:
-            size = f.stat().st_size
-            print(f"   {f.name:<45} {size:>7,} bytes")
-
-    if result_files:
-        print(f"\nGenerated {len(result_files)} result files:")
-        for f in result_files:
             size = f.stat().st_size
             print(f"   {f.name:<45} {size:>7,} bytes")
 
@@ -812,7 +558,7 @@ def run_tests() -> None:
         sys.exit(1)
     else:
         print("ALL TESTS PASSED")
-        print(f"  Check {test_dir}/ for message analysis and LLM results")
+        print(f"  Check {test_dir}/ for message analysis")
         sys.exit(0)
 
 

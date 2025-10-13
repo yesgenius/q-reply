@@ -194,7 +194,6 @@ def _format_history_message(qa_pair: QAPair) -> str:
         "answer": qa_pair["answer"],
         "confidence": qa_pair.get("similarity", 0.8),  # Use similarity as confidence if available
         "sources_used": ["context"],  # Historical answers come from context
-        "sources_used_reasoning": "Answer uses historical Q&A pair from current dialogue session. The information originates from previous assistant responses in this conversation.",
     }
     return json.dumps(response, ensure_ascii=False, indent=2)
 
@@ -223,7 +222,7 @@ def _generate_system_prompt(**kwargs: Any) -> str:
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "additionalProperties": False,
-            "required": ["answer", "confidence", "sources_used", "sources_used_reasoning"],
+            "required": ["answer", "confidence", "sources_used"],
             "properties": {
                 "answer": {"type": "string", "minLength": 0},
                 "confidence": {
@@ -241,10 +240,6 @@ def _generate_system_prompt(**kwargs: Any) -> str:
                     "minItems": 1,
                     "maxItems": 2,
                     "uniqueItems": True,
-                },
-                "sources_used_reasoning": {
-                    "type": "string",
-                    "minLength": 1,
                 },
             },
         },
@@ -267,19 +262,16 @@ MANDATORY OUTPUT JSON SCHEMA:
             "answer": "Russian comprehensive answer with line breaks that uses only the provided context",
             "confidence": 0.95,
             "sources_used": ["context"],
-            "sources_used_reasoning": "in Russian: Answer directly uses information from provided Q&A pairs. The context contains specific technical details matching the question.",
         },
         {
             "answer": "Russian comprehensive answer with line breaks that combining context with minor extra facts",
             "confidence": 0.56,
             "sources_used": ["context", "domain_knowledge"],
-            "sources_used_reasoning": "in Russian: Context provides base information but requires domain expertise for completeness. Adding general best practices not present in dialogue.",
         },
         {
             "answer": "Russian comprehensive answer with line breaks that using only general domain knowledge",
             "confidence": 0.35,
             "sources_used": ["domain_knowledge"],
-            "sources_used_reasoning": "in Russian: No relevant context found in dialogue history or provided Q&A pairs. Using only general technical knowledge to answer.",
         },
     ]
 
@@ -381,7 +373,7 @@ STEP 5 - CONFIDENCE CALCULATION:
   - Speculative/uncertain: Base score 0.0-0.2
 - Proceed to STEP 6
 
-STEP 6 - SOURCE TRACKING WITH STRICT DEFINITIONS AND REASONING (deterministic)
+STEP 6 — SOURCE TRACKING WITH STRICT DEFINITIONS (deterministic)
 SOURCE DEFINITIONS (only 2 possible sources):
   • "context": ANY information from THIS dialogue session:
     - ALL messages in dialogue history (system/user/assistant roles)
@@ -396,10 +388,6 @@ TRACKING PROCESS:
 - Include "domain_knowledge" IFF at least one fact originates OUTSIDE the current dialogue session
 - NEVER include a source unless at least one factual statement actually uses it
 - Sources are tracked by ACTUAL ORIGIN of facts, NOT by topic similarity
-REASONING GENERATION:
-- Create "sources_used_reasoning" field with EXACTLY two sentences in Russian:
-  - First sentence: State WHY this source/sources were selected (e.g., "Context provides specific technical details" or "No relevant context found")
-  - Second sentence: Clarify the key distinguishing factor (e.g., "The information comes directly from dialogue" or "Using general knowledge beyond dialogue")
 - Proceed to STEP 7
 
 STEP 7 - JSON ASSEMBLY:
@@ -407,7 +395,6 @@ STEP 7 - JSON ASSEMBLY:
   - "answer": [synthesized response from Step 3]
   - "confidence": [score from Step 5]
   - "sources_used": [array from Step 6]
-  - "sources_used_reasoning": [two-sentence explanation from Step 6]
 - Validate JSON structure compliance
 - Output ONLY the JSON object
 - Proceed to STEP 8
@@ -420,7 +407,6 @@ STEP 8 - FINAL CHECK YOURSELF:
         ▢ Response in Russian
         ▢ Confidence reflects actual source quality
         ▢ Sources accurately attributed
-        ▢ Sources reasoning clearly explains the attribution
         ▢ Pure JSON output (no wrapper text)
     PROHIBITED ACTIONS:
         × Adding explanatory text outside JSON structure
@@ -428,6 +414,7 @@ STEP 8 - FINAL CHECK YOURSELF:
         × Summarizing all available context
         × Using context that doesn't match question intent
         × Inflating confidence scores
+        × Mixing languages in response
 
 """
     return system_prompt
@@ -540,7 +527,6 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
             - answer: Extracted answer text
             - confidence: Float between 0 and 1
             - sources_used: List of sources used
-            - sources_used_reasoning: Explanation for source selection
 
     Raises:
         ValueError: If answer cannot be extracted from response.
@@ -566,7 +552,7 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
             )
 
         # Check for required fields in json_repair output
-        required_fields = {"answer", "confidence", "sources_used", "sources_used_reasoning"}
+        required_fields = {"answer", "confidence", "sources_used"}
         present_fields = set(repaired_obj.keys())
         missing_fields = required_fields - present_fields
 
@@ -643,22 +629,10 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
 
         result["sources_used"] = sources
 
-        # Validate sources_used_reasoning from json_repair
-        reasoning = repaired_obj.get("sources_used_reasoning")
-        if not isinstance(reasoning, str):
-            raise ValueError(
-                f"json_repair returned 'sources_used_reasoning' as {type(reasoning).__name__} "
-                f"instead of str: {repr(reasoning)[:100]}"
-            )
-        if not reasoning.strip():
-            raise ValueError("json_repair returned empty 'sources_used_reasoning' field")
-        result["sources_used_reasoning"] = reasoning
-
         logger.debug(
             f"Successfully validated json_repair output with "
             f"answer={answer[:100]}..., "
-            f"confidence={confidence_float}, sources={sources}, "
-            f"reasoning={reasoning[:50]}..."
+            f"confidence={confidence_float}, sources={sources}"
         )
         return result
 
@@ -711,14 +685,6 @@ def _extract_fields_fallback(response_text: str) -> dict[str, Any]:
         result["sources_used"] = []
     else:
         result["sources_used"] = sources
-
-    # Extract sources_used_reasoning (non-critical - use default if failed)
-    reasoning = _extract_sources_used_reasoning(response_text)
-    if reasoning is None:
-        logger.warning("Failed to extract sources_used_reasoning, using default")
-        result["sources_used_reasoning"] = "Unable to determine source reasoning from response."
-    else:
-        result["sources_used_reasoning"] = reasoning
 
     return result
 
@@ -823,39 +789,6 @@ def _extract_sources_used(text: str) -> list[str] | None:
         sources.append("domain_knowledge")
 
     return sources if sources else None
-
-
-def _extract_sources_used_reasoning(text: str) -> str | None:
-    """Extract sources_used_reasoning value from text.
-
-    Args:
-        text: Text to search.
-
-    Returns:
-        Extracted reasoning or None if not found.
-    """
-    # Try to find sources_used_reasoning in various formats
-    patterns = [
-        r'"sources_used_reasoning"\s*:\s*"([^"]+)"',  # JSON format
-        r'sources_used_reasoning\s*:\s*"([^"]+)"',  # Without quotes on key
-        r"'sources_used_reasoning'\s*:\s*'([^']+)'",  # Single quotes
-        r'"sources_used_reasoning"\s*:\s*([^,}]+)',  # Unquoted value
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        if match:
-            reasoning = match.group(1).strip()
-            # Clean up if unquoted extraction
-            if reasoning.endswith(","):
-                reasoning = reasoning[:-1].strip()
-            # Remove surrounding quotes if present
-            if reasoning.startswith('"') and reasoning.endswith('"'):
-                reasoning = reasoning[1:-1]
-            if reasoning:
-                return reasoning
-
-    return None
 
 
 def run(

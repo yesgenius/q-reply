@@ -58,10 +58,9 @@ COL_Q_QUESTION = 1  # Column A - Question
 COL_Q_ANSWER = 2  # Column B - Answer
 COL_Q_CONFIDENCE = 3  # Column C - Answer confidence
 COL_Q_SOURCES = 4  # Column D - Sources used
-COL_Q_SOURCES_REASONING = 5  # Column E - Sources reasoning
-COL_Q_S1 = 6  # Column F - First similarity score
-COL_Q_Q1 = 7  # Column G - First similar question
-COL_Q_A1 = 8  # Column H - First similar answer
+COL_Q_S1 = 5  # Column E - First similarity score
+COL_Q_Q1 = 6  # Column F - First similar question
+COL_Q_A1 = 7  # Column G - First similar answer
 # Additional columns for s2/q2/a2, s3/q3/a3, etc. will be dynamic
 
 # Column indices for CATEGORY sheet (1-based for openpyxl)
@@ -538,7 +537,6 @@ class AnswerGenerator:
                 "answer",
                 "answer_confidence",
                 "answer_sources_used",
-                "answer_sources_reasoning",
             ]
             # Add headers for similar Q&A pairs with similarity scores
             for i in range(1, TOP_K_SIMILAR + 1):
@@ -573,7 +571,6 @@ class AnswerGenerator:
                 "answer",
                 "answer_confidence",
                 "answer_sources_used",
-                "answer_sources_reasoning",
                 "answer_messages",
                 "answer_response",
                 "answer_response_content",
@@ -849,7 +846,6 @@ class AnswerGenerator:
             "answer": f"Failed to generate answer after {MAX_RETRY_ATTEMPTS_ANSWER} attempts. Last error: {last_error!s}",
             "confidence": 0.0,
             "sources_used": [],
-            "sources_used_reasoning": "",
             "messages": "[]",
             "response": "",
             "response_content": "",
@@ -901,7 +897,6 @@ class AnswerGenerator:
                 sheet_q.cell(row=row_idx, column=COL_Q_ANSWER, value="No similar questions found")
                 sheet_q.cell(row=row_idx, column=COL_Q_CONFIDENCE, value=0.0)
                 sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value="[]")
-                sheet_q.cell(row=row_idx, column=COL_Q_SOURCES_REASONING, value="")
                 return True
 
             logger.info(f"Found {len(similar_questions)} similar questions")
@@ -924,7 +919,6 @@ class AnswerGenerator:
                 sheet_q.cell(row=row_idx, column=COL_Q_ANSWER, value="Failed to generate answer")
                 sheet_q.cell(row=row_idx, column=COL_Q_CONFIDENCE, value=0.0)
                 sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value="[]")
-                sheet_q.cell(row=row_idx, column=COL_Q_SOURCES_REASONING, value="")
                 return False
 
             # Step 5: Write results to Q sheet with new columns
@@ -942,12 +936,6 @@ class AnswerGenerator:
             else:
                 sources_str = str(sources_used)
             sheet_q.cell(row=row_idx, column=COL_Q_SOURCES, value=sources_str)
-            # Add sources_used_reasoning
-            sheet_q.cell(
-                row=row_idx,
-                column=COL_Q_SOURCES_REASONING,
-                value=answer_result.get("sources_used_reasoning", ""),
-            )
 
             # Write similar Q&A pairs with similarity scores
             for i, result in enumerate(similar_questions[:TOP_K_SIMILAR]):
@@ -1018,11 +1006,6 @@ class AnswerGenerator:
                     row=row_idx,
                     column=col,
                     value=str(answer_result.get("sources_used", [])),
-                )
-                col += 1
-                # Add sources_used_reasoning to LOG sheet
-                sheet_log.cell(
-                    row=row_idx, column=col, value=answer_result.get("sources_used_reasoning", "")
                 )
                 col += 1
                 sheet_log.cell(row=row_idx, column=col, value=answer_result.get("messages", ""))
