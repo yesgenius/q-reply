@@ -553,6 +553,54 @@ def run_tests() -> None:
         print("Test 8 failed")
         tests_failed += 1
         failed_tests.append("Test 8")
+
+    # Sub-test 8e: Test case-insensitive category matching
+    try:
+        print("  8e) Test case-insensitive category matching")
+
+        # Set up categories with mixed case
+        get_category_prompt._current_categories = {
+            "Technical": "Tech questions",
+            "Business": "Business questions",
+            "Process Management": "Process questions",  # Multi-word category
+        }
+
+        # Test responses with wrong case that should be normalized
+        test_cases = [
+            # Response with lowercase category that should match
+            (
+                '{"category": "technical", "confidence": 0.95, "reasoning": "Test"}',
+                "Technical",
+            ),  # Should normalize to correct case
+            # Response with uppercase category
+            (
+                '{"category": "BUSINESS", "confidence": 0.85, "reasoning": "Test"}',
+                "Business",
+            ),  # Should normalize to correct case
+            # Response with mixed case for multi-word category
+            (
+                '{"category": "process management", "confidence": 0.75, "reasoning": "Test"}',
+                "Process Management",
+            ),  # Should normalize to correct case
+        ]
+
+        for response_text, expected_category in test_cases:
+            result = get_category_prompt._parse_json_response(response_text)
+
+            # Verify the category was normalized to correct case
+            assert result["category"] == expected_category, (
+                f"Expected normalized category '{expected_category}', got '{result['category']}'"
+            )
+
+            print(
+                f"      Normalized: '{response_text.split('"category":')[1].split(',')[0].strip()[1:-1]}' -> '{expected_category}'"
+            )
+
+        print("      Case-insensitive matching works correctly")
+    except Exception as e:
+        print(f"      Failed: {e}")
+        test_8_passed = False
+
     print()
 
     # Final summary

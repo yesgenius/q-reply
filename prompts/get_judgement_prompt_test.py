@@ -24,8 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
 from utils.logger import get_logger
 

@@ -115,6 +115,7 @@ def _format_user_prompt(question: str, answer: str | None = None) -> str:
             f"QUESTION: {question}"
             "\n---\n"
         )
+    user_prompt += "CATEGORIZE THE QUESTION NOW. RETURN ONLY JSON.\n"
     return user_prompt
 
 
@@ -173,11 +174,7 @@ def _generate_system_prompt(**kwargs: Any) -> str:
                     "maximum": 1,
                     "multipleOf": 0.01,
                 },
-                "reasoning": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200,  # Enforce two-sentence limit
-                },
+                "reasoning": {"type": "string"},
             },
         },
         ensure_ascii=False,
@@ -506,12 +503,27 @@ def _parse_json_response(response_text: str) -> dict[str, Any]:
         if _current_categories is None:
             raise ValueError("Categories not initialized. Call set_categories() first")
 
+        # Get the set of valid category names
         valid_categories = set(_current_categories.keys())
+
+        # Check if the category matches exactly (case-sensitive)
         if category not in valid_categories:
-            raise ValueError(
-                f"json_repair returned invalid 'category': {category!r}. "
-                f"Valid values: {valid_categories}"
-            )
+            # Try case-insensitive matching to handle LLM case variations
+            category_lower = category.lower()
+
+            # Search for a matching category ignoring case
+            for valid_cat in valid_categories:
+                if valid_cat.lower() == category_lower:
+                    # Found a match - use the correctly cased version
+                    category = valid_cat
+                    break
+            else:  # No match found even with case-insensitive search
+                # Category is truly invalid - raise the error
+                raise ValueError(
+                    f"json_repair returned invalid 'category': {category!r}. "
+                    f"Valid values: {valid_categories}"
+                )
+
         result["category"] = category
 
         # Validate confidence from json_repair

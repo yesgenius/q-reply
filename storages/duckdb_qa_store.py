@@ -82,12 +82,14 @@ class QADatabaseStore:
             return
 
         # Fresh create: fixed-size embedding arrays (FLOAT[N]).
+        # Store both normalized (for dedup/search) and original question text.
         self.conn.execute("CREATE SEQUENCE IF NOT EXISTS qa_id_seq START 1")
         self.conn.execute(
             f"""
             CREATE TABLE qa_records (
                 id BIGINT PRIMARY KEY DEFAULT nextval('qa_id_seq'),
-                question TEXT UNIQUE NOT NULL,
+                question_normalized TEXT UNIQUE NOT NULL,
+                question TEXT NOT NULL,
                 answer TEXT NOT NULL,
                 category TEXT,
                 question_embedding FLOAT[{self.embedding_size}],
@@ -158,17 +160,20 @@ class QADatabaseStore:
 
     @staticmethod
     def _normalize_category(value: str | None) -> str | None:
-        """Trim category input; map empty/whitespace-only to None.
+        """Normalize category to lowercase canonical form.
+
+        Trims whitespace and converts to lowercase for case-insensitive matching.
+        Empty/whitespace-only strings are mapped to None.
 
         Args:
             value: Category string or None.
 
         Returns:
-            Normalized category or None.
+            Normalized lowercase category or None.
         """
         if value is None:
             return None
-        normalized = value.strip()
+        normalized = value.strip().lower()  # Convert to lowercase for consistency
         return normalized if normalized else None
 
     # -------------------------- Embedding validation -------------------------
@@ -211,19 +216,21 @@ class QADatabaseStore:
         Returns:
             Record dict if found; otherwise None.
         """
-        q = self.preprocess_text(question)
-        row = self.conn.execute("SELECT * FROM qa_records WHERE question = ?", [q]).fetchone()
+        q_normalized = self.preprocess_text(question)
+        row = self.conn.execute(
+            "SELECT * FROM qa_records WHERE question_normalized = ?", [q_normalized]
+        ).fetchone()
         if row is None:
             return None
         return {
             "id": row[0],
-            "question": row[1],
-            "answer": row[2],
-            "category": row[3],
-            "question_embedding": row[4],
-            "answer_embedding": row[5],
-            "created_at": row[6],
-            "updated_at": row[7],
+            "question": row[2],  # Return original question text
+            "answer": row[3],
+            "category": row[4],
+            "question_embedding": row[5],
+            "answer_embedding": row[6],
+            "created_at": row[7],
+            "updated_at": row[8],
         }
 
     # ------------------------------- Mutations -------------------------------
@@ -239,7 +246,7 @@ class QADatabaseStore:
         """Insert a Q&A row (idempotent on question text).
 
         Args:
-            question: Question text (will be canonicalized).
+            question: Question text (original form preserved).
             answer: Answer text.
             category: Optional category (whitespace-only will be stored as NULL).
             question_embedding: Question embedding.
@@ -248,7 +255,8 @@ class QADatabaseStore:
         Returns:
             True on success; False on any validation/constraint error.
         """
-        q = self.preprocess_text(question)
+        q_normalized = self.preprocess_text(question)
+        q_original = question.strip()  # Keep original with minimal cleanup
         cat = self._normalize_category(category)
 
         try:
@@ -264,20 +272,20 @@ class QADatabaseStore:
             self.conn.execute(
                 f"""
                 INSERT INTO qa_records
-                (question, answer, category, question_embedding, answer_embedding)
-                VALUES (?, ?, ?, CAST(? AS FLOAT[{self.embedding_size}]),
+                (question_normalized, question, answer, category, question_embedding, answer_embedding)
+                VALUES (?, ?, ?, ?, CAST(? AS FLOAT[{self.embedding_size}]),
                               CAST(? AS FLOAT[{self.embedding_size}]))
                 """,
-                [q, answer, cat, q_emb, a_emb],
+                [q_normalized, q_original, answer, cat, q_emb, a_emb],
             )
             self.conn.execute("COMMIT")
             return True
         except duckdb.ConstraintException as exc:
-            # Duplicate unique(question) → not an error for idempotent insert.
+            # Duplicate unique(question_normalized) → not an error for idempotent insert.
             self.conn.execute("ROLLBACK")
             msg = str(exc).upper()
             if "UNIQUE" in msg or "DUPLICATE" in msg:
-                logger.info("Insert skipped: question already exists: %s", q[:80])
+                logger.info("Insert skipped: question already exists: %s", q_normalized[:80])
                 return False
             logger.error("Insert constraint error: %s", exc)
             return False
@@ -299,7 +307,7 @@ class QADatabaseStore:
         Returns:
             True if a row was updated; False if not found or on validation error.
         """
-        q = self.preprocess_text(question)
+        q_normalized = self.preprocess_text(question)
         try:
             a_emb = self._validate_and_normalize_embedding(answer_embedding)
         except ValueError as exc:
@@ -314,20 +322,20 @@ class QADatabaseStore:
                 SET answer = ?,
                     answer_embedding = CAST(? AS FLOAT[{self.embedding_size}]),
                     updated_at = CURRENT_TIMESTAMP
-                WHERE question = ?
+                WHERE question_normalized = ?
                 """,
-                [answer, a_emb, q],
+                [answer, a_emb, q_normalized],
             )
             # Verify presence (simple and explicit)
             row = self.conn.execute(
-                "SELECT COUNT(*) FROM qa_records WHERE question = ?", [q]
+                "SELECT COUNT(*) FROM qa_records WHERE question_normalized = ?", [q_normalized]
             ).fetchone()
             found = bool(row and row[0] > 0)
             if found:
                 self.conn.execute("COMMIT")
                 return True
             self.conn.execute("ROLLBACK")
-            logger.warning("Update skipped: question not found: %s", q[:80])
+            logger.warning("Update skipped: question not found: %s", q_normalized[:80])
             return False
         except Exception as exc:  # pragma: no cover
             try:
@@ -346,24 +354,24 @@ class QADatabaseStore:
         Returns:
             True if a row was updated; False if not found.
         """
-        q = self.preprocess_text(question)
+        q_normalized = self.preprocess_text(question)
         cat = self._normalize_category(category)
 
         try:
             self.conn.execute("BEGIN")
             self.conn.execute(
-                "UPDATE qa_records SET category = ?, updated_at = CURRENT_TIMESTAMP WHERE question = ?",
-                [cat, q],
+                "UPDATE qa_records SET category = ?, updated_at = CURRENT_TIMESTAMP WHERE question_normalized = ?",
+                [cat, q_normalized],
             )
             row = self.conn.execute(
-                "SELECT COUNT(*) FROM qa_records WHERE question = ?", [q]
+                "SELECT COUNT(*) FROM qa_records WHERE question_normalized = ?", [q_normalized]
             ).fetchone()
             found = bool(row and row[0] > 0)
             if found:
                 self.conn.execute("COMMIT")
                 return True
             self.conn.execute("ROLLBACK")
-            logger.warning("Category update skipped: question not found: %s", q[:80])
+            logger.warning("Category update skipped: question not found: %s", q_normalized[:80])
             return False
         except Exception as exc:  # pragma: no cover
             try:
@@ -453,7 +461,7 @@ class QADatabaseStore:
             results = [
                 {
                     "id": v[0],
-                    "question": v[1],
+                    "question": v[1],  # Return original question text
                     "answer": v[2],
                     "category": v[3],
                     "similarity": float(v[4]),
@@ -477,7 +485,7 @@ class QADatabaseStore:
         return [
             {
                 "id": r[0],
-                "question": r[1],
+                "question": r[1],  # Return original question text
                 "answer": r[2],
                 "category": r[3],
                 "created_at": r[4],
@@ -506,7 +514,7 @@ class QADatabaseStore:
         return [
             {
                 "id": r[0],
-                "question": r[1],
+                "question": r[1],  # Return original question text
                 "answer": r[2],
                 "category": r[3],
                 "created_at": r[4],
@@ -534,7 +542,7 @@ class QADatabaseStore:
             if keep:
                 placeholders = ",".join(["?"] * len(keep))
                 self.conn.execute(
-                    f"DELETE FROM qa_records WHERE question NOT IN ({placeholders})",
+                    f"DELETE FROM qa_records WHERE question_normalized NOT IN ({placeholders})",
                     list(keep),
                 )
             else:

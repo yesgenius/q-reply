@@ -173,6 +173,7 @@ def _format_user_prompt(question: str, qa_pairs: list[QAPair] | None = None) -> 
             "CONTEXT Q&A PAIRS: use ONLY if directly relevant to the question above:\n"
             f"{context_text}\n"
         )
+    user_prompt += "ANSWER THE QUESTION NOW. RETURN ONLY JSON.\n"
 
     return user_prompt
 
@@ -192,7 +193,9 @@ def _format_history_message(qa_pair: QAPair) -> str:
     # Create response matching expected format
     response = {
         "answer": qa_pair["answer"],
-        "confidence": qa_pair.get("similarity", 0.8),  # Use similarity as confidence if available
+        "confidence": round(
+            qa_pair.get("similarity", 0.8), 2
+        ),  # Use similarity as confidence if available
         "sources_used": ["context"],  # Historical answers come from context
         "sources_used_reasoning": "Answer uses historical Q&A pair from current dialogue session. The information originates from previous assistant responses in this conversation.",
     }
@@ -225,7 +228,7 @@ def _generate_system_prompt(**kwargs: Any) -> str:
             "additionalProperties": False,
             "required": ["answer", "confidence", "sources_used", "sources_used_reasoning"],
             "properties": {
-                "answer": {"type": "string", "minLength": 0},
+                "answer": {"type": "string"},
                 "confidence": {
                     "type": "number",
                     "minimum": 0,
@@ -244,7 +247,6 @@ def _generate_system_prompt(**kwargs: Any) -> str:
                 },
                 "sources_used_reasoning": {
                     "type": "string",
-                    "minLength": 1,
                 },
             },
         },

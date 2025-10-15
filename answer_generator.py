@@ -74,7 +74,7 @@ SIMILARITY_THRESHOLD = 0.8  # Threshold for both DB search and context filtering
 USE_CATEGORIES = False  # True: categorize and filter by category, False: no categorization
 
 # Context mode configuration
-USE_CHAT_HISTORY = True  # True: Q&A as dialogue history, False: Q&A in user context
+USE_CHAT_HISTORY = False  # True: Q&A as dialogue history, False: Q&A in user context
 
 # Embedding configuration
 EMBEDDING_MODEL = "EmbeddingsGigaR"
