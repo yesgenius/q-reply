@@ -9,7 +9,7 @@ embeddings using GigaChat, and maintains a synchronized vector database
 with detailed logging for monitoring and debugging.
 
 Usage:
-   python update_db.py
+   python db_update.py
 
 Configuration:
    Adjust settings at the beginning of the script for IDE execution.
@@ -306,11 +306,11 @@ class DatabaseUpdater:
 
         # Generate timestamp
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        output_file = OUTPUT_DIR / f"QA_{self.timestamp}.xlsx"
+        output_file = OUTPUT_DIR / f"QA_IMPORT_{self.timestamp}.xlsx"
 
         # Setup file logging for this session
         if LOG_TO_FILE:
-            log_file = OUTPUT_DIR / f"QA_{self.timestamp}.log"
+            log_file = OUTPUT_DIR / f"QA_IMPORT_{self.timestamp}.log"
             setup_logging(log_file=log_file, level=LOG_LEVEL)
 
         logger.info(f"Copying {INPUT_FILE} to {output_file}")

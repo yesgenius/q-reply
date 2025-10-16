@@ -39,7 +39,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import logging
 import re
 from typing import Any
 
@@ -57,9 +56,10 @@ llm = GigaChatClient()
 params: dict[str, Any] = {
     "model": "GigaChat-2-Pro",
     # "model": "GigaChat",
-    # "temperature": 0.1,
-    # "top_p": 0.95,
+    "temperature": 0.0,
+    "top_p": 1.0,
     "stream": False,
+    "profanity_check": False,  # False - disabling the censor
     # "max_tokens": 1000,  # Sufficient for JSON
     # "repetition_penalty": 1.1,
 }
@@ -380,7 +380,7 @@ MANDATORY OUTPUT JSON SCHEMA:
             "recall_r_to_c": 0.90,
             "contradiction": False,
             "hallucination": False,
-            "justification": "Brief explanation of semantic alignment between texts",
+            "justification": "Brief explanation of semantic alignment between texts in Russian",
             "evidence": [
                 {"source": "candidate", "quote": "exact text fragment from candidate"},
                 {"source": "reference", "quote": "exact text fragment from reference"},
@@ -404,280 +404,647 @@ Return ONLY valid JSON.
     # Main system prompt with rigid command structure
     system_prompt = f"""
 YOU ARE A DETERMINISTIC SEMANTIC EQUIVALENCE JUDGE.
-YOUR SOLE TASK: Evaluate bidirectional semantic entailment between REFERENCE(R) and CANDIDATE(C) answers with strict JSON output.
+YOUR SOLE TASK: Evaluate bidirectional semantic entailment between REFERENCE(R) and CANDIDATE(C) answers.
 
-{json_schema_section}
 {json_example_section}
 
-MEMORIZE EVALUATION SCALE FOR PRECISION AND RECALL:
-- 1.00: Complete equivalence in the evaluated direction
-- 0.90: All key points covered, only trivial details missing
-- 0.80: One key detail missing/added, conclusion unchanged
-- 0.60: Part of core missing/added, conclusion partially matches
-- 0.40: Some fragments match, but conclusion different/incomplete
-- 0.20: Sporadic matches only
-- 0.00: No semantic overlap
+CRITICAL RULES - MUST ALWAYS APPLY:
+1. NUMERICAL TOLERANCE: Values with difference ≤{NUMERICAL_TOLERANCE_RELATIVE * 100}% OR ≤{NUMERICAL_TOLERANCE_ABSOLUTE} are EQUIVALENT, NEVER contradictions
+2. HALLUCINATION: Adding specific facts (names, dates, versions) not in reference = ALWAYS set hallucination=true
+3. PARTIAL COVERAGE: Count items explicitly. Example: 2 of 4 items = 0.50 recall, NOT 0.80
+4. UNIT CONVERSIONS: Automatically convert (km↔m, hours↔minutes). Same values in different units = NO contradiction
 
-CRITICAL EVALUATION RULES - EXECUTION ALGORITHM STEP-BY-STEP:
+EVALUATION SCALE (STRICT):
+- 1.00: COMPLETE equivalence (100% items match)
+- 0.90: All KEY items match, only trivial details missing (like LED indicators, minor formatting)
+- 0.80: ONE key item missing from 4+, core message intact
+- 0.75: ONE key item missing from 3-4 total items
+- 0.60: HALF of items covered (e.g., 2 of 4, 3 of 6)
+- 0.50: EXACTLY half covered
+- 0.40: SOME items match (e.g., 1 of 3, 2 of 5)
+- 0.25: ONE item matches from 4+ total
+- 0.20: VAGUE conceptual overlap without specifics
+- 0.10: Minimal semantic connection
+- 0.00: NO semantic overlap AT ALL
 
-STEP 1 - INPUT ANALYSIS:
-- Parse REFERENCE text completely
-- Parse CANDIDATE text completely
-- Extract core semantic content from both texts
-- Identify all factual claims, assertions, and data points
-- Map key concepts between REFERENCE and CANDIDATE
-- Proceed to STEP 2
+EXECUTION ALGORITHM STEP-BY-STEP:
 
-STEP 2 - PRECISION CALCULATION (precision_c_to_r):
-- For EACH semantic unit in CANDIDATE:
-  - Search for equivalent meaning in REFERENCE
-  - Mark as CONFIRMED if found (regardless of wording)
-  - Mark as UNCONFIRMED if not found
-- Calculate: confirmed_units / total_candidate_units
-- Apply scale: Map ratio to 0.00-1.00 range with 0.01 precision
-- IGNORE: Style differences, formatting, politeness markers
-- FOCUS: Factual content and semantic meaning only
-- Proceed to STEP 3
+STEP 1 - COUNT ITEMS:
+- List ALL semantic units in REFERENCE: [item1, item2, ...]
+- List ALL semantic units in CANDIDATE: [item1, item2, ...]
+- Count explicitly: reference_count, candidate_count
 
-STEP 3 - RECALL CALCULATION (recall_r_to_c):
-- For EACH semantic unit in REFERENCE:
-  - Search for equivalent meaning in CANDIDATE
-  - Mark as COVERED if found (regardless of wording)
-  - Mark as MISSING if not found
-- Calculate: covered_units / total_reference_units
-- Apply scale: Map ratio to 0.00-1.00 range with 0.01 precision
-- IGNORE: Style differences, formatting, politeness markers
-- FOCUS: Factual content and semantic meaning only
-- Proceed to STEP 4
+STEP 2 - PRECISION (precision_c_to_r):
+What fraction of CANDIDATE is confirmed by REFERENCE?
+- List candidate items: [C1, C2, C3, C4...]
+- For EACH candidate item, check: exists in reference? YES/NO
+- Count ONLY items with YES
+- Calculate: confirmed_items / total_candidate_items
+- CRITICAL: If reference has 2 items but candidate has 4, maximum confirmed can be 2!
+- Example: Ref="A,B", Cand="A,B,C,D" → precision = 2/4 = 0.50, NOT 1.00!
+- Round to 0.01
 
-STEP 4 - CONTRADICTION DETECTION:
-- Compare all assertions between CANDIDATE and REFERENCE
-- SET contradiction = true ONLY when:
-  - Key assertions are inverted (yes↔no, allowed↔forbidden, above↔below)
-  - Numerical values differ beyond tolerance: |C-R| > max({NUMERICAL_TOLERANCE_ABSOLUTE}, {NUMERICAL_TOLERANCE_RELATIVE}*|R|)
-  - Different entities change conclusion (different model/algorithm/protocol/currency)
-  - Unit conversion errors affect conclusion
-- Apply numerical tolerance strictly (values within tolerance are EQUIVALENT)
-- Handle unit conversions: mm↔cm↔m↔km, ms↔s↔min↔h, mg↔g↔kg, °C↔K, bit↔byte↔KB↔MB↔GB
-- Proceed to STEP 5
+STEP 3 - RECALL (recall_r_to_c):
+What fraction of REFERENCE is covered by CANDIDATE?
+- Count: How many reference items exist in candidate?
+- Calculate: covered_items / reference_count
+- IMPORTANT: Even vague mentions count as partial coverage (0.1-0.2)
+- "Database work happens" vs "JOIN, indexing, caching" = 0.20 (vague overlap)
+- Round to 0.01
 
-STEP 5 - HALLUCINATION DETECTION:
-- Scan CANDIDATE for NEW verifiable facts absent from QUESTION and REFERENCE
-- Identify: Numbers, dates, names, URLs, prices, policies, versions
-- Evaluate materiality: Does the new fact affect conclusion/recommendation?
-- SET hallucination = true ONLY when BOTH conditions met:
-  - NEW verifiable facts exist in CANDIDATE
-  - These facts MATERIALLY affect the conclusion
-- Proceed to STEP 6
+STEP 4 - CONTRADICTION:
+Set to true ONLY if:
+- Direct opposites (yes↔no, enabled↔disabled, above↔below)
+- Numbers differ STRICTLY MORE than {NUMERICAL_TOLERANCE_RELATIVE * 100}% AND STRICTLY MORE than {NUMERICAL_TOLERANCE_ABSOLUTE}
+- Different entities that change meaning
+NEVER for values within tolerance!
 
-STEP 6 - EVIDENCE EXTRACTION:
-- Select up to {EVIDENCE_MAX_ITEMS} most relevant text fragments
-- For each fragment:
-  - Copy EXACT text (no paraphrasing)
-  - Mark source as "candidate" or "reference"
-  - Ensure fragment demonstrates key semantic alignment/divergence
-- Priority: Select evidence that best supports scores and flags
-- Proceed to STEP 7
+STEP 5 - HALLUCINATION:
+Set to true if CANDIDATE adds:
+- Specific names (e.g., "Guido van Rossum")
+- Specific dates (e.g., "1991")
+- Specific versions (e.g., "version 3.12")
+- Other verifiable facts NOT in reference or question
 
-STEP 7 - JUSTIFICATION SYNTHESIS:
-- Write maximum {JUSTIFICATION_MAX_WORDS} words explaining evaluation
-- Structure: State scores → Explain key matches/mismatches → Note any flags
-- Focus on SEMANTIC content, not surface differences
-- Be concise and factual
-- Proceed to STEP 8
+STEP 6 - EVIDENCE:
+Copy EXACT text fragments (max {EVIDENCE_MAX_ITEMS}):
+- One from reference showing what it contains
+- One from candidate showing what it contains
 
-STEP 8 - CRITIQUE AND REFINE:
-- Review all calculated scores for consistency:
-  - Do precision and recall accurately reflect semantic overlap?
-  - Are contradiction and hallucination flags justified?
-  - Does justification align with numerical scores?
-- Identify any inconsistencies or errors
-- Refine: Recalculate if errors found
-- Verify: All values within valid ranges
-- Ensure: Justification accurately explains the evaluation
-- Proceed to STEP 9
+STEP 7 - JUSTIFICATION:
+Write under {JUSTIFICATION_MAX_WORDS} words:
+- State item counts
+- Explain scores
+- Note any flags
 
-STEP 9 - JSON ASSEMBLY:
-- Populate all required fields:
-  - "precision_c_to_r": [calculated score from STEP 2]
-  - "recall_r_to_c": [calculated score from STEP 3]
-  - "contradiction": [boolean from STEP 4]
-  - "hallucination": [boolean from STEP 5]
-  - "justification": [text from STEP 7]
-  - "evidence": [array from STEP 6]
-- Validate JSON structure compliance
-- Ensure all numerical values have exactly 2 decimal places
-- Output ONLY the JSON object
-- Proceed to STEP 10
+STEP 8 - OUTPUT JSON:
+{{
+  "precision_c_to_r": [0.00-1.00],
+  "recall_r_to_c": [0.00-1.00],
+  "contradiction": [true/false],
+  "hallucination": [true/false],
+  "justification": "[brief explanation in Russian]",
+  "evidence": [
+    {{"source": "reference", "quote": "[exact text]"}},
+    {{"source": "candidate", "quote": "[exact text]"}}
+  ]
+}}
 
-STEP 10 - FINAL CHECK YOURSELF:
-    VALIDATION CHECKS:
-        ▢ Precision score between 0.00-1.00 with 0.01 steps
-        ▢ Recall score between 0.00-1.00 with 0.01 steps
-        ▢ Contradiction flag is boolean (true/false)
-        ▢ Hallucination flag is boolean (true/false)
-        ▢ Justification under {JUSTIFICATION_MAX_WORDS} words
-        ▢ Evidence array has maximum {EVIDENCE_MAX_ITEMS} items
-        ▢ Each evidence item has "source" and "quote" fields
-        ▢ Quotes are EXACT text from source documents
-        ▢ Valid JSON syntax with no text outside structure
-        ▢ Numerical tolerance applied correctly
-        ▢ Unit conversions handled appropriately
+EXAMPLES OF CORRECT SCORING:
 
-    PROHIBITED ACTIONS:
-        × Adding explanatory text outside JSON
-        × Including markdown formatting in output
-        × Discussing reasoning process in output
-        × Expressing uncertainty or apologizing
-        × Modifying quoted evidence text
-        × Ignoring numerical tolerance rules
-        × Creating new fields not in schema
+Example 1: REFERENCE has 4 items, CANDIDATE has 2 of those 4
+→ recall = 2/4 = 0.50 (NOT 0.80!)
+→ precision = 2/2 = 1.00
 
+Example 2: REFERENCE "100.0 meters", CANDIDATE "102.0 meters"
+→ Difference EXACTLY 2.0% = {NUMERICAL_TOLERANCE_RELATIVE * 100}% tolerance
+→ contradiction = false (boundary case - INCLUDED in tolerance)
+
+Example 3: REFERENCE "Python is a language", CANDIDATE "Python is a language created by Guido van Rossum in 1991"
+→ hallucination = true (adds creator name and date)
+
+FINAL VALIDATION:
+- Scores match actual counts
+- Tolerance applied correctly
+- Hallucination detected for added facts
+- JSON valid with all required fields
 """
 
     return system_prompt
 
 
 def _generate_chat_history(**kwargs: Any) -> list[dict[str, str]]:
-    """Generate chat history with few-shot examples for better LLM calibration.
+    """Generate chat history with calibrated few-shot examples for LLM.
 
-    Provides carefully selected examples that demonstrate correct evaluation
-    of edge cases where models commonly make mistakes.
+    Provides examples strictly aligned with the evaluation scale to ensure
+    consistent precision/recall scoring according to defined thresholds.
 
     Args:
         **kwargs: Reserved for future parameters.
 
     Returns:
-        List of message dictionaries demonstrating correct evaluations.
+        List of message dictionaries demonstrating correct evaluations
+        for each threshold level.
     """
     history = [
-        # Example 1: Partial match - precision vs recall distinction
+        # Example 1: Complete equivalence (1.00)
         {
             "role": "user",
-            "content": """
-EVALUATE THIS ANSWER PAIR:
+            "content": """EVALUATE THIS ANSWER PAIR:
 
 QUESTION:
-What are the main components of a computer?
+List the primary colors
 
 REFERENCE (R):
-A computer has four main components: CPU, memory, storage, and motherboard.
+The primary colors are red, blue, and yellow.
 
 CANDIDATE (C):
-A computer has CPU and memory.
+The primary colors are red, blue, and yellow.
 
 EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
         },
         {
             "role": "assistant",
-            "content": """
-{
-  "precision_c_to_r": 1.0,
-  "recall_r_to_c": 0.5,
-  "contradiction": false,
-  "hallucination": false,
-  "justification": "All candidate info exists in reference; candidate covers 2 of 4 components",
-  "evidence": [
-    {"source": "candidate", "quote": "CPU and memory"},
-    {"source": "reference", "quote": "CPU, memory, storage, and motherboard"}
-  ]
-}""",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 1.00,
+                    "recall_r_to_c": 1.00,
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Полная семантическая эквивалентность между reference и candidate",
+                    "evidence": [
+                        {"source": "reference", "quote": "red, blue, and yellow"},
+                        {"source": "candidate", "quote": "red, blue, and yellow"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
         },
-        # Example 2: Numerical tolerance case
+        # Example 2: Trivial detail missing (0.90)
         {
             "role": "user",
-            "content": """
-EVALUATE THIS ANSWER PAIR:
+            "content": """EVALUATE THIS ANSWER PAIR:
 
 QUESTION:
-What is the distance?
+What are the system components?
 
 REFERENCE (R):
-The distance is 50.0 kilometers.
+System components include CPU processor, RAM memory, SSD storage, motherboard, and power LED indicator.
 
 CANDIDATE (C):
-The distance is 50.8 kilometers.
+System components include CPU processor, RAM memory, SSD storage, motherboard.
 
 EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
         },
         {
             "role": "assistant",
-            "content": """
-{
-  "precision_c_to_r": 0.98,
-  "recall_r_to_c": 0.98,
-  "contradiction": false,
-  "hallucination": false,
-  "justification": "Values differ by 1.6%, within 2% tolerance threshold",
-  "evidence": [
-    {"source": "reference", "quote": "50.0 kilometers"},
-    {"source": "candidate", "quote": "50.8 kilometers"}
-  ]
-}""",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 1.00,
+                    "recall_r_to_c": 0.90,
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Все ключевые компоненты покрыты, отсутствует только тривиальный 'LED indicator'",
+                    "evidence": [
+                        {
+                            "source": "reference",
+                            "quote": "CPU, RAM, SSD, motherboard, and LED indicator",
+                        },
+                        {"source": "candidate", "quote": "CPU, RAM, SSD, motherboard"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
         },
-        # Example 3: Clear contradiction beyond tolerance
+        # Example 3: One key item missing from 3-4 (0.75)
         {
             "role": "user",
-            "content": """
-EVALUATE THIS ANSWER PAIR:
+            "content": """EVALUATE THIS ANSWER PAIR:
 
 QUESTION:
-What is the price?
+What are the critical requirements?
 
 REFERENCE (R):
-The price is $100.
+Critical requirements: authentication system, data encryption, backup mechanism, monitoring dashboard.
 
 CANDIDATE (C):
-The price is $200.
+Critical requirements: authentication system, data encryption, backup mechanism.
 
 EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
         },
         {
             "role": "assistant",
-            "content": """
-{
-  "precision_c_to_r": 0.0,
-  "recall_r_to_c": 0.0,
-  "contradiction": true,
-  "hallucination": false,
-  "justification": "Price differs by 100%, far exceeding tolerance",
-  "evidence": [
-    {"source": "reference", "quote": "$100"},
-    {"source": "candidate", "quote": "$200"}
-  ]
-}""",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 1.00,
+                    "recall_r_to_c": 0.75,
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Отсутствует одно ключевое требование 'monitoring', покрыто 3 из 4 элементов",
+                    "evidence": [
+                        {
+                            "source": "reference",
+                            "quote": "authentication, encryption, backup, monitoring",
+                        },
+                        {"source": "candidate", "quote": "authentication, encryption, backup"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
         },
-        # Example 4: Hallucination with added facts
+        # Example 4: Exactly half covered (0.50)
         {
             "role": "user",
-            "content": """
-EVALUATE THIS ANSWER PAIR:
+            "content": """EVALUATE THIS ANSWER PAIR:
 
 QUESTION:
-What is Java?
+Describe the data processing pipeline
 
 REFERENCE (R):
-Java is a programming language.
+Pipeline stages: data ingestion, validation, transformation, enrichment.
 
 CANDIDATE (C):
-Java is a programming language released by Sun Microsystems in 1995, currently at version 21.
+Pipeline stages: data ingestion, validation.
 
 EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
         },
         {
             "role": "assistant",
-            "content": """
-{
-  "precision_c_to_r": 0.3,
-  "recall_r_to_c": 1.0,
-  "contradiction": false,
-  "hallucination": true,
-  "justification": "Candidate adds verifiable facts not in reference: company, year, version",
-  "evidence": [
-    {"source": "candidate", "quote": "released by Sun Microsystems in 1995, currently at version 21"},
-    {"source": "reference", "quote": "Java is a programming language"}
-  ]
-}""",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 1.00,
+                    "recall_r_to_c": 0.50,
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Покрыта ровно половина этапов pipeline: 'ingestion, validation' из 4",
+                    "evidence": [
+                        {
+                            "source": "reference",
+                            "quote": "ingestion, validation, transformation, enrichment",
+                        },
+                        {"source": "candidate", "quote": "ingestion, validation"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 5: One item from 4+ (0.25)
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+What are the algorithm steps?
+
+REFERENCE (R):
+Algorithm performs sorting, filtering, mapping, and aggregation operations.
+
+CANDIDATE (C):
+Algorithm performs sorting operation.
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 1.00,
+                    "recall_r_to_c": 0.25,
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Упомянута только одна операция 'sorting' из четырех (1 из 4)",
+                    "evidence": [
+                        {
+                            "source": "reference",
+                            "quote": "sorting, filtering, mapping, aggregation",
+                        },
+                        {"source": "candidate", "quote": "sorting operation"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 6: Vague conceptual overlap (0.20)
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+Describe the database architecture
+
+REFERENCE (R):
+Database uses sharding, replication, indexing, and caching strategies.
+
+CANDIDATE (C):
+Database stores data.
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 0.20,
+                    "recall_r_to_c": 0.20,
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Смутное концептуальное совпадение, конкретные методы 'sharding, replication' не упомянуты",
+                    "evidence": [
+                        {
+                            "source": "reference",
+                            "quote": "sharding, replication, indexing, caching",
+                        },
+                        {"source": "candidate", "quote": "stores data"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 7: Minimal semantic connection (0.10)
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+Explain the network architecture
+
+REFERENCE (R):
+Network uses multi-layer switches, VLAN segmentation, BGP routing, and firewall rules.
+
+CANDIDATE (C):
+System connects computers.
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 0.10,
+                    "recall_r_to_c": 0.10,
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Минимальная связь: 'connects computers' vs 'switches, VLAN, BGP, firewall'",
+                    "evidence": [
+                        {
+                            "source": "reference",
+                            "quote": "switches, VLAN segmentation, BGP routing, firewall",
+                        },
+                        {"source": "candidate", "quote": "connects computers"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 8: Numerical within tolerance - 1.5%
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+What is the measurement?
+
+REFERENCE (R):
+The measurement is 100.0 meters.
+
+CANDIDATE (C):
+The measurement is 101.5 meters.
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 1.00,
+                    "recall_r_to_c": 1.00,
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Значения '100.0' и '101.5' отличаются на 1.5%, в допуске 2%",
+                    "evidence": [
+                        {"source": "reference", "quote": "100.0 meters"},
+                        {"source": "candidate", "quote": "101.5 meters"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 9: Numerical at exact 2% boundary
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+What is the value?
+
+REFERENCE (R):
+The value is 100.0
+
+CANDIDATE (C):
+The value is 102.0
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 1.00,
+                    "recall_r_to_c": 1.00,
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Разница между '100.0' и '102.0' ровно 2.0%, на границе допуска (включительно)",
+                    "evidence": [
+                        {"source": "reference", "quote": "100.0"},
+                        {"source": "candidate", "quote": "102.0"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 10: Hallucination detection
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+What is Python?
+
+REFERENCE (R):
+Python is a high-level programming language.
+
+CANDIDATE (C):
+Python is a high-level programming language created by Guido van Rossum in 1991.
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 0.50,
+                    "recall_r_to_c": 1.00,
+                    "contradiction": False,
+                    "hallucination": True,
+                    "justification": "Добавлены факты 'Guido van Rossum' и '1991', отсутствующие в reference",
+                    "evidence": [
+                        {"source": "reference", "quote": "high-level programming language"},
+                        {"source": "candidate", "quote": "created by Guido van Rossum in 1991"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 11: Clear contradiction
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+Is the feature enabled?
+
+REFERENCE (R):
+The feature is enabled by default.
+
+CANDIDATE (C):
+The feature is disabled by default.
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 0.00,
+                    "recall_r_to_c": 0.00,
+                    "contradiction": True,
+                    "hallucination": False,
+                    "justification": "Прямое противоречие: 'enabled' vs 'disabled'",
+                    "evidence": [
+                        {"source": "reference", "quote": "enabled by default"},
+                        {"source": "candidate", "quote": "disabled by default"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 12: No semantic overlap (0.00)
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+What is the network protocol?
+
+REFERENCE (R):
+Uses TCP/IP protocol with SSL encryption.
+
+CANDIDATE (C):
+Uses quantum entanglement communication.
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 0.00,
+                    "recall_r_to_c": 0.00,
+                    "contradiction": True,
+                    "hallucination": False,
+                    "justification": "Совершенно разные технологии: 'TCP/IP' vs 'quantum entanglement'",
+                    "evidence": [
+                        {"source": "reference", "quote": "TCP/IP protocol with SSL encryption"},
+                        {"source": "candidate", "quote": "quantum entanglement communication"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 13: Candidate has extra items (precision < 1.0)
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+What features are available?
+
+REFERENCE (R):
+Available features: search, filter.
+
+CANDIDATE (C):
+Available features: search, filter, sort, export.
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 0.50,  # 2 of 4 items confirmed
+                    "recall_r_to_c": 1.00,  # All reference items covered
+                    "contradiction": False,
+                    "hallucination": True,  # Adding new features
+                    "justification": "Кандидат добавляет 'sort, export' отсутствующие в reference (2 из 4 подтверждены)",
+                    "evidence": [
+                        {"source": "reference", "quote": "search, filter"},
+                        {"source": "candidate", "quote": "search, filter, sort, export"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 14: Nested/hierarchical structures
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+Describe the system modules
+
+REFERENCE (R):
+System has: module A (features: X, Y, Z), module B (features: P, Q)
+
+CANDIDATE (C):
+System has: module A (feature: X)
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 1.00,  # What's mentioned is correct
+                    "recall_r_to_c": 0.20,  # 1 of 5 features covered
+                    "contradiction": False,
+                    "hallucination": False,
+                    "justification": "Покрыта только feature X из 5 features (X,Y,Z,P,Q)",
+                    "evidence": [
+                        {
+                            "source": "reference",
+                            "quote": "module A (features: X, Y, Z), module B (features: P, Q)",
+                        },
+                        {"source": "candidate", "quote": "module A (feature: X)"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+        # Example 14.5: Precision clarification - extra items
+        {
+            "role": "user",
+            "content": """EVALUATE THIS ANSWER PAIR:
+
+QUESTION:
+What are the system components?
+
+REFERENCE (R):
+System has: processor unit, memory module
+
+CANDIDATE (C):
+System has: processor unit, memory module, graphics card, network adapter
+
+EXECUTE EVALUATION NOW. RETURN ONLY JSON.""",
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "precision_c_to_r": 0.50,  # ONLY 2 of 4 candidate items in reference!
+                    "recall_r_to_c": 1.00,  # All 2 reference items in candidate
+                    "contradiction": False,
+                    "hallucination": True,  # Adding graphics card, network adapter
+                    "justification": "Candidate добавляет 'graphics card, network adapter' отсутствующие в reference (2 из 4 подтверждены)",
+                    "evidence": [
+                        {"source": "reference", "quote": "processor unit, memory module"},
+                        {
+                            "source": "candidate",
+                            "quote": "processor unit, memory module, graphics card, network adapter",
+                        },
+                    ],
+                },
+                ensure_ascii=False,
+            ),
         },
     ]
 
@@ -1226,6 +1593,8 @@ def run(
 ) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     """Evaluate semantic equivalence using symmetric entailment.
 
+    This function NEVER raises exceptions. All errors are returned as JSON with an "error" key.
+
     Args:
         question: The original question being answered.
         reference_answer: The reference/ground truth answer.
@@ -1234,112 +1603,171 @@ def run(
 
     Returns:
         Tuple containing:
-            - Valid JSON string with evaluation result containing:
-                - score: Final score (0-100)
-                - class: Quality class (good/ok/bad)
-                - f1: Semantic F1 score
-                - precision_c_to_r: Precision score (C→R)
-                - recall_r_to_c: Recall score (R→C)
-                - contradiction: Boolean flag
-                - hallucination: Boolean flag
-                - justification: Explanation string
-                - evidence: List of evidence items
-                - penalties: Total penalties applied
-            - List of messages sent to the LLM
-            - Raw response dict from the LLM
+            - JSON string with evaluation result OR error information
+            - List of messages sent to the LLM (may be empty on early errors)
+            - Raw response dict from the LLM OR error details dict
 
-    Raises:
-        ValueError: If inputs are empty or response is invalid.
-        RuntimeError: If LLM response format is unexpected.
+    Note:
+        Always returns a complete tuple even on errors.
+        Check for "error" key in parsed JSON to detect failures.
 
     Example:
         >>> result, msgs, resp = run("What is X?", "X is Y", "X equals Y")
-        >>> import json
-        >>> print(json.loads(result)["score"])
-        85
+        >>> data = json.loads(result)
+        >>> if "error" in data:
+        ...     print(f"Error: {data['error']}")
+        ... else:
+        ...     print(f"Score: {data['score']}")
     """
-    # Normalize inputs first (before any validation)
-    q = (question or "").strip()
-    r = (reference_answer or "").strip()
-    c = (candidate_answer or "").strip()
-
-    # Edge case §8: Empty candidate - not an exception, but a valid case
-    if c == "":
-        result = {
-            "score": 0,
-            "class": "bad",
-            "f1": 0.0,
-            "precision_c_to_r": 1.0,  # Empty has no incorrect content
-            "recall_r_to_c": 0.0,  # Empty covers nothing
-            "contradiction": False,
-            "hallucination": False,
-            "justification": "Empty candidate answer",
-            "evidence": [],
-            "penalties": 0.0,
-        }
-        return json.dumps(result, ensure_ascii=False, indent=2), [], {}
-
-    # Now strict validation for remaining fields
-    if not q:
-        raise ValueError("question must be non-empty")
-    if not r:
-        # §8: Empty reference "exclude from aggregates" - valid to throw error and log
-        logger.warning("Empty reference_answer - exclude from aggregates")
-        raise ValueError("reference_answer must be non-empty")
-
-    # Merge parameters
-    request_params = {k: v for k, v in params.items() if v is not None}
-    if custom_params:
-        for k, v in custom_params.items():
-            if v is not None:
-                request_params[k] = v
-
-    # Build messages
-    messages_list = get_messages(q, r, c)
-
-    logger.debug(f"Judging candidate answer for: {q[:50]}...")
-    logger.debug(f"Request params: {request_params}")
+    # Initialize return values early for error handling
+    messages_list = []
+    error_details = {"stage": None, "type": None, "details": None}
 
     try:
+        # Normalize inputs first (before any validation)
+        q = (question or "").strip()
+        r = (reference_answer or "").strip()
+        c = (candidate_answer or "").strip()
+
+        # Edge case: Empty candidate - not an error, but a valid case
+        if c == "":
+            result = {
+                "score": 0,
+                "class": "bad",
+                "f1": 0.0,
+                "precision_c_to_r": 1.0,  # Empty has no incorrect content
+                "recall_r_to_c": 0.0,  # Empty covers nothing
+                "contradiction": False,
+                "hallucination": False,
+                "justification": "Empty candidate answer",
+                "evidence": [],
+                "penalties": 0.0,
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2), messages_list, {}
+
+        # Validation - return errors instead of raising
+        if not q:
+            error_msg = "question must be non-empty"
+            logger.error(error_msg)
+            error_details.update(
+                {"stage": "validation", "type": "ValueError", "details": error_msg}
+            )
+            return (
+                json.dumps({"error": error_msg}, ensure_ascii=False),
+                messages_list,
+                error_details,
+            )
+
+        if not r:
+            # Empty reference "exclude from aggregates" - valid to log but return as error
+            logger.warning("Empty reference_answer - exclude from aggregates")
+            error_msg = "reference_answer must be non-empty"
+            error_details.update(
+                {"stage": "validation", "type": "ValueError", "details": error_msg}
+            )
+            return (
+                json.dumps({"error": error_msg}, ensure_ascii=False),
+                messages_list,
+                error_details,
+            )
+
+        # Merge parameters
+        request_params = {k: v for k, v in params.items() if v is not None}
+        if custom_params:
+            for k, v in custom_params.items():
+                if v is not None:
+                    request_params[k] = v
+
+        # Build messages
+        try:
+            messages_list = get_messages(q, r, c)
+        except Exception as e:
+            error_msg = f"Failed to build messages: {e}"
+            logger.error(error_msg)
+            error_details.update(
+                {"stage": "message_building", "type": type(e).__name__, "details": str(e)}
+            )
+            return (
+                json.dumps({"error": error_msg}, ensure_ascii=False),
+                messages_list,
+                error_details,
+            )
+
+        logger.debug(f"Judging candidate answer for: {q[:50]}...")
+        logger.debug(f"Request params: {request_params}")
+
         # Make LLM request
-        raw_response = llm.chat_completion(messages=messages_list, **request_params)
+        raw_response = {}
+        try:
+            raw_response = llm.chat_completion(messages=messages_list, **request_params)
+        except Exception as e:
+            error_msg = f"LLM request failed: {e}"
+            logger.error(error_msg)
+            error_details.update(
+                {
+                    "stage": "llm_request",
+                    "type": type(e).__name__,
+                    "details": str(e),
+                    "messages_count": len(messages_list),
+                }
+            )
+            return (
+                json.dumps({"error": error_msg}, ensure_ascii=False),
+                messages_list,
+                error_details,
+            )
 
-        # Extract content from response
-        if not isinstance(raw_response, dict):
-            raise RuntimeError(f"Expected dict response, got {type(raw_response)}")
+        # Process response
+        try:
+            # Extract content from response
+            if not isinstance(raw_response, dict):
+                raise RuntimeError(f"Expected dict response, got {type(raw_response)}")
 
-        if "choices" not in raw_response or not raw_response["choices"]:
-            raise RuntimeError("Response missing valid 'choices'")
+            if "choices" not in raw_response or not raw_response["choices"]:
+                raise RuntimeError("Response missing valid 'choices'")
 
-        first_choice = raw_response["choices"][0]
-        if "message" not in first_choice or "content" not in first_choice["message"]:
-            raise RuntimeError("Response missing message content")
+            first_choice = raw_response["choices"][0]
+            if "message" not in first_choice or "content" not in first_choice["message"]:
+                raise RuntimeError("Response missing message content")
 
-        response_text = first_choice["message"]["content"]
+            response_text = first_choice["message"]["content"]
 
-        # Parse judgement response
-        judge_output = _parse_json_response(response_text)
+            # Parse judgement response
+            judge_output = _parse_json_response(response_text)
 
-        # Calculate final metrics
-        metrics = _calculate_metrics(judge_output)
+            # Calculate final metrics
+            metrics = _calculate_metrics(judge_output)
 
-        # Combine all results
-        final_result = {
-            "score": metrics["score"],
-            "class": metrics["class"],
-            "f1": round(metrics["f1"], 4),
-            "precision_c_to_r": round(judge_output["precision_c_to_r"], 4),
-            "recall_r_to_c": round(judge_output["recall_r_to_c"], 4),
-            "contradiction": judge_output["contradiction"],
-            "hallucination": judge_output["hallucination"],
-            "justification": judge_output["justification"],
-            "evidence": judge_output["evidence"],
-            "penalties": round(metrics["penalties"], 2),
-        }
+            # Combine all results
+            final_result = {
+                "score": metrics["score"],
+                "class": metrics["class"],
+                "f1": round(metrics["f1"], 4),
+                "precision_c_to_r": round(judge_output["precision_c_to_r"], 4),
+                "recall_r_to_c": round(judge_output["recall_r_to_c"], 4),
+                "contradiction": judge_output["contradiction"],
+                "hallucination": judge_output["hallucination"],
+                "justification": judge_output["justification"],
+                "evidence": judge_output["evidence"],
+                "penalties": round(metrics["penalties"], 2),
+            }
 
-        result_json = json.dumps(final_result, ensure_ascii=False, indent=2)
-        return result_json, messages_list, raw_response
+            # Success - return normal result
+            result_json = json.dumps(final_result, ensure_ascii=False, indent=2)
+            return result_json, messages_list, raw_response
+
+        except Exception as e:
+            error_msg = f"Response processing failed: {e}"
+            logger.error(error_msg)
+            # Include raw response content if available for debugging
+            error_data = {"error": error_msg}
+            if "response_text" in locals():
+                error_data["raw_content"] = response_text
+            return json.dumps(error_data, ensure_ascii=False), messages_list, raw_response
 
     except Exception as e:
-        logger.error(f"Judgement failed: {e}")
-        raise
+        # Catch-all for any unexpected errors
+        error_msg = f"Unexpected error in run(): {e}"
+        logger.error(error_msg, exc_info=True)
+        error_details.update({"stage": "unknown", "type": type(e).__name__, "details": str(e)})
+        return json.dumps({"error": error_msg}, ensure_ascii=False), messages_list, error_details

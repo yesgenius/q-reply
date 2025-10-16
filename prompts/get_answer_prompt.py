@@ -69,6 +69,7 @@ params: dict[str, Any] = {
     # "temperature": 0.3,  # Balanced for informative yet creative answers
     # "top_p": 0.95,
     "stream": False,
+    "profanity_check": False,  # False - disabling the censor
     # "max_tokens": 1000,  # Sufficient for comprehensive answers
     # "repetition_penalty": 1.1,
 }
