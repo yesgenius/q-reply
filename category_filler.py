@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# q-reply/category_filler.py
 """Question category filler script with answer context and response logging support.
 
 This script automatically fills question categories using GigaChat LLM

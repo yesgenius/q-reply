@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# q-reply/utils/logger.py
 """Centralized logging configuration module.
 
 This module provides a unified logging setup for all project components,

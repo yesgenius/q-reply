@@ -1,8 +1,15 @@
+# q-reply/prompts/get_category_prompt_test.py
 """Test module for get_category_prompt with message saving.
 
 This test module validates the question categorization prompt functionality,
 including category initialization, question classification with/without answers,
 confidence scoring, and error handling. Saves all generated messages to files.
+
+Example:
+    Run all tests:
+```bash
+    python prompts/get_category_prompt_test.py
+```
 """
 
 from __future__ import annotations
@@ -19,7 +26,18 @@ current_dir = Path(__file__).parent
 parent_dir = current_dir.parent
 sys.path.insert(0, str(parent_dir))
 
-# Import the module to test
+# First ensure gigachat is importable (like in get_answer_prompt_test.py)
+try:
+    from gigachat.client import GigaChatClient
+
+    print(f"Successfully imported GigaChatClient from: {parent_dir}/gigachat/")
+except ImportError as e:
+    print(f"Failed to import GigaChatClient: {e}")
+    print(f"  Searched in: {parent_dir}/gigachat/")
+    print(f"  Current sys.path: {sys.path[:3]}...")
+    sys.exit(1)
+
+# Now we can safely import the module to test
 import get_category_prompt
 
 
@@ -486,6 +504,11 @@ def run_tests() -> None:
         # Save the messages and result
         save_messages(messages, "msgs_08_run_test", test_dir)
 
+        # Save the LLM result to JSON file
+        result_file = test_dir / "result_08c_run_test.json"
+        result_file.write_text(result_json, encoding="utf-8")
+        print(f"      Result saved to: {result_file.name}")
+
         # Check result structure
         if "error" in result:
             # API call failed (expected if no API key)
@@ -615,9 +638,17 @@ def run_tests() -> None:
 
     # List saved files
     saved_files = sorted(test_dir.glob("msgs_*.txt"))
+    result_files = sorted(test_dir.glob("result_*.json"))
+
     if saved_files:
         print(f"\nGenerated {len(saved_files)} message files:")
         for f in saved_files:
+            size = f.stat().st_size
+            print(f"   {f.name:<45} {size:>7,} bytes")
+
+    if result_files:
+        print(f"\nGenerated {len(result_files)} result files:")
+        for f in result_files:
             size = f.stat().st_size
             print(f"   {f.name:<45} {size:>7,} bytes")
 

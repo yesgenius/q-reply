@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# q-reply/setup.py
 """Project setup script for q-reply.
 
 This script automates the local deployment of the q-reply project.
@@ -20,6 +20,7 @@ import tempfile
 from typing import NoReturn
 from urllib.error import URLError
 from urllib.request import urlretrieve
+import webbrowser  # Added for README opening
 import zipfile
 
 
@@ -256,6 +257,23 @@ def get_activation_commands() -> list[str]:
     return [f"source {VENV_DIR}/bin/activate"]
 
 
+def open_readme_in_browser() -> None:
+    """Open README.md from GitHub repository in default browser."""
+    try:
+        # Extract repository URL from archive URL (DRY principle)
+        # From: https://github.com/yesgenius/q-reply/archive/refs/heads/main.zip
+        # To: https://github.com/yesgenius/q-reply/blob/main/README.md
+        repo_base = PROJECT_URL.replace("/archive/refs/heads/main.zip", "")
+        readme_url = f"{repo_base}/blob/main/README.md"
+
+        print_status("Opening README.md from GitHub...", "INFO")
+        webbrowser.open(readme_url)
+        print_status("README.md opened in browser", "SUCCESS")
+    except Exception as e:
+        # Non-critical error, just log warning
+        print_status(f"Could not open README in browser: {e}", "WARNING")
+
+
 def main() -> None:
     """Main setup workflow with safe merge strategy."""
     print_status("Starting project setup", "INFO")
@@ -305,6 +323,9 @@ def main() -> None:
         print("\nProject files have been merged safely.")
         print("Existing files not in the archive were preserved.")
         print("=" * 50)
+
+        # Open README.md in browser after successful setup
+        open_readme_in_browser()
 
     except KeyboardInterrupt:
         print_status("\nSetup interrupted by user", "WARNING")

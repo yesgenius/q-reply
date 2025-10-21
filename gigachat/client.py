@@ -1,3 +1,4 @@
+# q-reply/gigachat/client.py
 """GigaChat API client implementation.
 
 This module provides a client for interacting with the GigaChat API,

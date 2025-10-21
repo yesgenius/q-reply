@@ -1,3 +1,4 @@
+# q-reply/embeddings/base_embedding.py
 """Base embedding template for semantic search and similarity tasks.
 
 This module provides a universal template for creating embedding modules

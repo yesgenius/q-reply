@@ -1,3 +1,4 @@
+# q-reply/storages/duckdb_qa_store.py
 """DuckDB wrapper for a Q&A store with vector embeddings (simple & reliable).
 
 This module provides a minimal, maintainable wrapper around DuckDB for storing

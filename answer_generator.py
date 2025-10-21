@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# q-reply/answer_generator.py
 """Conference question answer generator script using RAG with DuckDB.
 
 This script generates answers for conference questions using a Retrieval-Augmented

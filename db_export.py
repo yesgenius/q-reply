@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# q-reply/db_export.py
 """DuckDB to Excel exporter for Q&A system.
 
 This script exports Q&A data from DuckDB vector database to Excel file,

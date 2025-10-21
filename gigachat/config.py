@@ -1,3 +1,4 @@
+# q-reply/gigachat/config.py
 """Configuration module for GigaChat API client.
 
 This module provides a simple and reliable way to load configuration

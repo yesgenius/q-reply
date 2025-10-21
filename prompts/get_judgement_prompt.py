@@ -1,3 +1,4 @@
+# q-reply/prompts/get_judgement_prompt.py
 """Symmetric entailment judgement module for answer evaluation.
 
 This module provides functionality to evaluate how semantically equivalent
@@ -60,8 +61,8 @@ params: dict[str, Any] = {
     "top_p": 1.0,
     "stream": False,
     "profanity_check": False,  # False - disabling the censor
+    "repetition_penalty": 1.0,
     # "max_tokens": 1000,  # Sufficient for JSON
-    # "repetition_penalty": 1.1,
 }
 
 # Evaluation configuration constants
@@ -129,179 +130,6 @@ CANDIDATE (C):
 EXECUTE EVALUATION NOW. RETURN ONLY JSON.
 """
     return user_prompt
-
-
-# def _generate_system_prompt(**kwargs: Any) -> str:
-#     """Generate system prompt for symmetric entailment judgement.
-
-#     Creates a structured prompt that instructs the LLM to act as
-#     a strict deterministic judge with JSON output.
-
-#     Args:
-#         **kwargs: Reserved for future configuration options.
-
-#     Returns:
-#         System prompt string for judgement task.
-
-#     Example:
-#         >>> prompt = _generate_system_prompt()
-#     """
-#     # JSON schema for strict validation - removed maxLength for justification (DRY principle)
-#     json_schema = json.dumps(
-#         {
-#             "$schema": "https://json-schema.org/draft/2020-12/schema",
-#             "type": "object",
-#             "additionalProperties": False,
-#             "required": [
-#                 "precision_c_to_r",
-#                 "recall_r_to_c",
-#                 "contradiction",
-#                 "hallucination",
-#                 "justification",
-#                 "evidence",
-#             ],
-#             "properties": {
-#                 "precision_c_to_r": {
-#                     "type": "number",
-#                     "minimum": 0,
-#                     "maximum": 1,
-#                     "multipleOf": 0.01,
-#                 },
-#                 "recall_r_to_c": {"type": "number", "minimum": 0, "maximum": 1, "multipleOf": 0.01},
-#                 "contradiction": {"type": "boolean"},
-#                 "hallucination": {"type": "boolean"},
-#                 "justification": {"type": "string"},
-#                 "evidence": {
-#                     "type": "array",
-#                     "items": {
-#                         "type": "object",
-#                         "additionalProperties": False,
-#                         "required": ["source", "quote"],
-#                         "properties": {
-#                             "source": {"type": "string", "enum": ["candidate", "reference"]},
-#                             "quote": {"type": "string"},
-#                         },
-#                     },
-#                     "maxItems": EVIDENCE_MAX_ITEMS,
-#                 },
-#             },
-#         },
-#         ensure_ascii=False,
-#         indent=2,
-#     )
-#     json_schema_section = (
-#         f"""
-# MANDATORY OUTPUT JSON SCHEMA:
-# {json_schema}
-
-# """
-#         if json_schema
-#         else ""
-#     )
-
-#     json_example = json.dumps(
-#         {
-#             "precision_c_to_r": "number between 0.00 and 1.00 (step 0.01)",
-#             "recall_r_to_c": "number between 0.00 and 1.00 (step 0.01)",
-#             "contradiction": "true or false",
-#             "hallucination": "true or false",
-#             "justification": "short explanation",
-#             "evidence": [
-#                 {"source": "candidate or reference", "quote": "string taken directly from the text"}
-#             ],
-#         },
-#         ensure_ascii=False,
-#         indent=2,
-#     )
-#     json_example_section = (
-#         f"""
-# MANDATORY OUTPUT JSON EXAMPLE:
-# {json_example}
-# Return ONLY valid JSON.
-
-# """
-#         if json_example
-#         else ""
-#     )
-
-#     system_prompt = f"""
-# YOU ARE A DETERMINISTIC SEMANTIC EQUIVALENCE JUDGE.
-# YOUR SOLE TASK: Evaluate bidirectional semantic entailment between REFERENCE(R) and CANDIDATE(C) answers.
-
-# {json_schema_section}
-
-# {json_example_section}
-
-# CRITICAL EVALUATION RULES YOU MUST FOLLOW:
-# 0. EVALUATION SCALE FOR PRECISION AND RECALL:
-#    - 1.0: Complete equivalence in the evaluated direction
-#    - 0.9: All key points covered, only trivial details missing
-#    - 0.8: One key detail missing/added, conclusion unchanged
-#    - 0.6: Part of core missing/added, conclusion partially matches
-#    - 0.4: Some fragments match, but conclusion different/incomplete
-#    - 0.2: Sporadic matches only
-#    - 0.0: No semantic overlap
-
-# 1. PRECISION (precision_c_to_r): CALCULATE what fraction of CANDIDATE content is confirmed by REFERENCE
-#    - 1.0 = ALL candidate information exists in reference
-#    - 0.0 = NO candidate information exists in reference
-#    - IGNORE style, format, politeness - EVALUATE ONLY factual content
-
-# 2. RECALL (recall_r_to_c): CALCULATE what fraction of REFERENCE content is covered by CANDIDATE
-#    - 1.0 = ALL reference information exists in candidate
-#    - 0.0 = NO reference information exists in candidate
-#    - IGNORE style, format, politeness - EVALUATE ONLY factual content
-
-# 3. CONTRADICTION FLAG (contradiction): SET to true ONLY when:
-#    - Key assertions are inverted (yes/no, allowed/forbidden, above/below)
-#    - Numerical values differ BEYOND tolerance: |C-R| > max({NUMERICAL_TOLERANCE_ABSOLUTE}, {
-#         NUMERICAL_TOLERANCE_RELATIVE
-#     }*|R|)
-#    - Different entities that change conclusion (different model/algorithm/protocol/currency)
-#    - Unit conversion errors affecting conclusion
-
-# 4. HALLUCINATION FLAG (hallucination): SET to true ONLY when BOTH conditions met:
-#    - CANDIDATE contains NEW verifiable facts (numbers/dates/names/URLs/prices/policies/versions) absent from QUESTION and REFERENCE
-#    - These facts MATERIALLY affect the conclusion or recommendation
-
-# 5. JUSTIFICATION (justification): WRITE maximum {
-#         JUSTIFICATION_MAX_WORDS
-#     } words explaining your scores
-
-# 6. EVIDENCE (evidence): PROVIDE up to {
-#         EVIDENCE_MAX_ITEMS
-#     } short quotes with exact source attribution
-
-# 7. NUMERICAL TOLERANCE: YOU MUST APPLY these exact rules:
-#    - Values within |C-R| ≤ max({NUMERICAL_TOLERANCE_ABSOLUTE}, {
-#         NUMERICAL_TOLERANCE_RELATIVE
-#     }*|R|) are EQUIVALENT
-#    - Example: 100.0 vs 101.5 (1.5% difference) is EQUIVALENT when tolerance is 2%
-#    - NEVER mark as contradiction if within tolerance
-
-# 8. UNIT CONVERSION: YOU MUST automatically convert simple units:
-#    - Length: mm↔cm↔m↔km
-#    - Time: ms↔s↔min↔h
-#    - Mass: mg↔g↔kg
-#    - Temperature: °C↔K (by difference only)
-#    - Data: bit↔byte↔KB↔MB↔GB
-#    - Percentages: treat as ratios
-#    - Currency: DO NOT convert exchange rates
-
-
-# NEVER:
-# - Add explanatory text outside JSON
-# - Include markdown formatting
-# - Discuss your reasoning process
-# - Apologize or express uncertainty
-
-# ALWAYS:
-# - Output pure JSON only
-# - Apply numerical tolerance strictly
-# - Evaluate semantic meaning, not surface form
-# - Set flags conservatively (only when clearly warranted)"""
-
-#     return system_prompt
 
 
 def _generate_system_prompt(**kwargs: Any) -> str:

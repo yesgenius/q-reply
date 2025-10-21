@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# q-reply/db_update.py
 """DuckDB vector database updater for Q&A system.
 
 This script synchronizes Q&A data from Excel with a DuckDB vector database,

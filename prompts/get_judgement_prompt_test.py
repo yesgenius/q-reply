@@ -1,3 +1,4 @@
+# q-reply/prompts/get_judgement_prompt_test.py
 """Test module for symmetric entailment judgement functionality.
 
 This module provides comprehensive testing for the get_judgement_prompt module,
@@ -8,22 +9,22 @@ numerical tolerance, and edge cases as specified in the requirements.
 
 Example:
     Run all tests:
-
-    ```bash
+```bash
     python -m prompts.get_judgement_prompt_test
-    ```
+```
 
     Or use pytest for more detailed output:
-
-    ```bash
+```bash
     pytest prompts/get_judgement_prompt_test.py -v
-    ```
+```
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from utils.logger import get_logger
@@ -32,6 +33,52 @@ from prompts import get_judgement_prompt
 
 
 logger = get_logger(__name__)
+
+
+def save_messages(messages: list[dict[str, str]], filename: str, test_dir: Path) -> None:
+    """Save messages to formatted text file with real newlines.
+
+    Args:
+        messages: List of message dictionaries to save.
+        filename: Name for the output file (without extension).
+        test_dir: Directory to save files in.
+    """
+    txt_path = test_dir / f"{filename}.txt"
+
+    # Custom JSON serialization with real newlines
+    def format_json_with_newlines(obj: Any, indent_level: int = 0) -> str:
+        indent = "  " * indent_level
+
+        if isinstance(obj, dict):
+            if not obj:
+                return "{}"
+            items = []
+            for key, value in obj.items():
+                formatted_value = format_json_with_newlines(value, indent_level + 1)
+                items.append(f'{indent}  "{key}": {formatted_value}')
+            return "{\n" + ",\n".join(items) + f"\n{indent}}}"
+
+        if isinstance(obj, list):
+            if not obj:
+                return "[]"
+            items = []
+            for item in obj:
+                formatted_item = format_json_with_newlines(item, indent_level + 1)
+                items.append(f"{indent}  {formatted_item}")
+            return "[\n" + ",\n".join(items) + f"\n{indent}]"
+
+        if isinstance(obj, str):
+            # Replace \n with actual newlines while keeping valid JSON string syntax
+            escaped = obj.replace("\\", "\\\\").replace('"', '\\"')
+            # Now replace literal \n sequences with actual newlines
+            escaped = escaped.replace("\\\\n", "\n")
+            return f'"{escaped}"'
+
+        return json.dumps(obj, ensure_ascii=False)
+
+    with open(txt_path, "w", encoding="utf-8") as f:
+        formatted = format_json_with_newlines(messages)
+        f.write(formatted)
 
 
 class TestResult:
@@ -90,8 +137,11 @@ def test_initialization() -> TestResult:
     return result
 
 
-def test_perfect_match() -> TestResult:
+def test_perfect_match(test_dir: Path = None) -> TestResult:
     """Test evaluation of semantically identical answers.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -105,6 +155,12 @@ def test_perfect_match() -> TestResult:
     try:
         result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_perfect_match", test_dir)
+            result_file = test_dir / "result_perfect_match.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         # Validate high scores for perfect match
         if output["score"] < get_judgement_prompt.THRESHOLD_GOOD:
@@ -130,8 +186,11 @@ def test_perfect_match() -> TestResult:
     return result
 
 
-def test_partial_match() -> TestResult:
+def test_partial_match(test_dir: Path = None) -> TestResult:
     """Test evaluation with missing information.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -145,6 +204,12 @@ def test_partial_match() -> TestResult:
     try:
         result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_partial_match", test_dir)
+            result_file = test_dir / "result_partial_match.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         # Precision should be high (all candidate info is correct)
         if output["precision_c_to_r"] < 0.9:
@@ -170,8 +235,11 @@ def test_partial_match() -> TestResult:
     return result
 
 
-def test_contradiction_detection() -> TestResult:
+def test_contradiction_detection(test_dir: Path = None) -> TestResult:
     """Test detection of contradictory information.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -185,6 +253,12 @@ def test_contradiction_detection() -> TestResult:
     try:
         result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_contradiction_detection", test_dir)
+            result_file = test_dir / "result_contradiction_detection.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         if not output["contradiction"]:
             result.fail("Should detect contradiction (50% speed difference)")
@@ -209,8 +283,11 @@ def test_contradiction_detection() -> TestResult:
     return result
 
 
-def test_hallucination_detection() -> TestResult:
+def test_hallucination_detection(test_dir: Path = None) -> TestResult:
     """Test detection of hallucinated information.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -227,6 +304,12 @@ def test_hallucination_detection() -> TestResult:
     try:
         result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_hallucination_detection", test_dir)
+            result_file = test_dir / "result_hallucination_detection.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         if not output["hallucination"]:
             result.fail("Should detect hallucination (new facts: creator, year, version)")
@@ -249,8 +332,11 @@ def test_hallucination_detection() -> TestResult:
     return result
 
 
-def test_empty_candidate() -> TestResult:
+def test_empty_candidate(test_dir: Path = None) -> TestResult:
     """Test edge case with empty candidate answer.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status per §8 specification.
@@ -264,6 +350,12 @@ def test_empty_candidate() -> TestResult:
     try:
         result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_empty_candidate", test_dir)
+            result_file = test_dir / "result_empty_candidate.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         # Validate per §8 specification
         if output["score"] != 0:
@@ -292,8 +384,11 @@ def test_empty_candidate() -> TestResult:
     return result
 
 
-def test_numerical_tolerance() -> TestResult:
+def test_numerical_tolerance(test_dir: Path = None) -> TestResult:
     """Test numerical tolerance within acceptable range.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -307,6 +402,12 @@ def test_numerical_tolerance() -> TestResult:
     try:
         result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_numerical_tolerance", test_dir)
+            result_file = test_dir / "result_numerical_tolerance.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         tolerance_pct = get_judgement_prompt.NUMERICAL_TOLERANCE_RELATIVE * 100
 
@@ -326,9 +427,6 @@ def test_numerical_tolerance() -> TestResult:
         logger.error(f"Numerical tolerance test error: {e}")
 
     return result
-
-
-# NEW TESTS START HERE
 
 
 def test_invalid_json_response() -> TestResult:
@@ -449,8 +547,11 @@ def test_empty_reference() -> TestResult:
     return result
 
 
-def test_numerical_tolerance_boundaries() -> TestResult:
+def test_numerical_tolerance_boundaries(test_dir: Path = None) -> TestResult:
     """Test exact boundary conditions for numerical tolerance.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -497,8 +598,11 @@ def test_numerical_tolerance_boundaries() -> TestResult:
     return result
 
 
-def test_unit_conversions() -> TestResult:
+def test_unit_conversions(test_dir: Path = None) -> TestResult:
     """Test automatic unit conversion handling.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -1098,11 +1202,14 @@ def test_always_returns_tuple() -> TestResult:
     return result
 
 
-def test_evaluation_scale_calibration() -> TestResult:
+def test_evaluation_scale_calibration(test_dir: Path = None) -> TestResult:
     """Test that LLM evaluation follows the defined precision/recall scale.
 
     Verifies semantic thresholds with more concrete examples and wider ranges
     to account for LLM non-determinism.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -1164,9 +1271,19 @@ def test_evaluation_scale_calibration() -> TestResult:
             ),
         ]
 
+        test_count = 1
         for question, reference, candidate, expected_range, description in test_cases:
-            result_json, _, _ = get_judgement_prompt.run(question, reference, candidate)
+            result_json, messages, raw_response = get_judgement_prompt.run(
+                question, reference, candidate
+            )
             output = json.loads(result_json)
+
+            # Save test artifacts if directory provided
+            if test_dir:
+                save_messages(messages, f"msgs_scale_calibration_{test_count:02d}", test_dir)
+                result_file = test_dir / f"result_scale_calibration_{test_count:02d}.json"
+                result_file.write_text(result_json, encoding="utf-8")
+                test_count += 1
 
             # Check if error occurred (e.g., LLM failure)
             if "error" in output:
@@ -1209,8 +1326,17 @@ def test_evaluation_scale_calibration() -> TestResult:
         ]
 
         for question, reference, candidate, expected_range, description in test_cases_precision:
-            result_json, _, _ = get_judgement_prompt.run(question, reference, candidate)
+            result_json, messages, raw_response = get_judgement_prompt.run(
+                question, reference, candidate
+            )
             output = json.loads(result_json)
+
+            # Save test artifacts if directory provided
+            if test_dir:
+                save_messages(messages, f"msgs_precision_test_{test_count:02d}", test_dir)
+                result_file = test_dir / f"result_precision_test_{test_count:02d}.json"
+                result_file.write_text(result_json, encoding="utf-8")
+                test_count += 1
 
             if "error" in output:
                 result.fail(f"{description}: Got error - {output['error']}")
@@ -1235,14 +1361,14 @@ def test_evaluation_scale_calibration() -> TestResult:
     return result
 
 
-# Добавить после test_evaluation_scale_calibration() и перед run_all_tests()
-
-
-def test_precision_with_extra_items() -> TestResult:
+def test_precision_with_extra_items(test_dir: Path = None) -> TestResult:
     """Test precision when candidate adds non-existent items.
 
     Verifies that precision correctly reflects the fraction of candidate
     content that is confirmed by reference when candidate has extra items.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -1254,8 +1380,14 @@ def test_precision_with_extra_items() -> TestResult:
         reference = "Available features: search, filter"
         candidate = "Available features: search, filter, sort, export"
 
-        result_json, _, _ = get_judgement_prompt.run(question, reference, candidate)
+        result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_precision_extra_items", test_dir)
+            result_file = test_dir / "result_precision_extra_items.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         if "error" in output:
             result.fail(f"Got error: {output['error']}")
@@ -1291,11 +1423,14 @@ def test_precision_with_extra_items() -> TestResult:
     return result
 
 
-def test_contradiction_with_hallucination() -> TestResult:
+def test_contradiction_with_hallucination(test_dir: Path = None) -> TestResult:
     """Test when both contradiction and hallucination flags are true.
 
     Verifies correct handling of cases where candidate both contradicts
     reference and adds new factual information.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -1307,8 +1442,14 @@ def test_contradiction_with_hallucination() -> TestResult:
         reference = "System is enabled"
         candidate = "System is disabled since version 2.0"
 
-        result_json, _, _ = get_judgement_prompt.run(question, reference, candidate)
+        result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_contradiction_hallucination", test_dir)
+            result_file = test_dir / "result_contradiction_hallucination.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         if "error" in output:
             result.fail(f"Got error: {output['error']}")
@@ -1344,11 +1485,14 @@ def test_contradiction_with_hallucination() -> TestResult:
     return result
 
 
-def test_semantic_equivalence_synonyms() -> TestResult:
+def test_semantic_equivalence_synonyms(test_dir: Path = None) -> TestResult:
     """Test recognition of semantic equivalence with different wording.
 
     Verifies that semantically equivalent phrases using synonyms
     and abbreviations are recognized as equivalent.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -1377,9 +1521,19 @@ def test_semantic_equivalence_synonyms() -> TestResult:
             ),
         ]
 
+        test_count = 1
         for question, reference, candidate, description in test_cases:
-            result_json, _, _ = get_judgement_prompt.run(question, reference, candidate)
+            result_json, messages, response = get_judgement_prompt.run(
+                question, reference, candidate
+            )
             output = json.loads(result_json)
+
+            # Save test artifacts if directory provided
+            if test_dir:
+                save_messages(messages, f"msgs_synonyms_{test_count:02d}", test_dir)
+                result_file = test_dir / f"result_synonyms_{test_count:02d}.json"
+                result_file.write_text(result_json, encoding="utf-8")
+                test_count += 1
 
             if "error" in output:
                 result.fail(f"{description}: Got error - {output['error']}")
@@ -1413,11 +1567,14 @@ def test_semantic_equivalence_synonyms() -> TestResult:
     return result
 
 
-def test_partial_contradiction() -> TestResult:
+def test_partial_contradiction(test_dir: Path = None) -> TestResult:
     """Test when only part of answer contradicts.
 
     Verifies correct handling when some values match and others contradict,
     ensuring both precision and contradiction flag are set appropriately.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -1429,8 +1586,14 @@ def test_partial_contradiction() -> TestResult:
         reference = "Values are: A=1, B=2, C=3"
         candidate = "Values are: A=1, B=5, C=3"
 
-        result_json, _, _ = get_judgement_prompt.run(question, reference, candidate)
+        result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_partial_contradiction", test_dir)
+            result_file = test_dir / "result_partial_contradiction.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         if "error" in output:
             result.fail(f"Got error: {output['error']}")
@@ -1459,11 +1622,14 @@ def test_partial_contradiction() -> TestResult:
     return result
 
 
-def test_element_order_independence() -> TestResult:
+def test_element_order_independence(test_dir: Path = None) -> TestResult:
     """Test that element order doesn't affect scoring.
 
     Verifies that reordering elements in a list doesn't impact
     precision/recall scores when content is identical.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -1481,9 +1647,19 @@ def test_element_order_independence() -> TestResult:
             ),
         ]
 
+        test_count = 1
         for question, reference, candidate, description in test_cases:
-            result_json, _, _ = get_judgement_prompt.run(question, reference, candidate)
+            result_json, messages, response = get_judgement_prompt.run(
+                question, reference, candidate
+            )
             output = json.loads(result_json)
+
+            # Save test artifacts if directory provided
+            if test_dir:
+                save_messages(messages, f"msgs_order_{test_count:02d}", test_dir)
+                result_file = test_dir / f"result_order_{test_count:02d}.json"
+                result_file.write_text(result_json, encoding="utf-8")
+                test_count += 1
 
             if "error" in output:
                 result.fail(f"{description}: Got error - {output['error']}")
@@ -1517,11 +1693,14 @@ def test_element_order_independence() -> TestResult:
     return result
 
 
-def test_nested_information_structures() -> TestResult:
+def test_nested_information_structures(test_dir: Path = None) -> TestResult:
     """Test handling of hierarchical/nested information.
 
     Verifies correct evaluation of nested structures where candidate
     provides partial coverage of hierarchical information.
+
+    Args:
+        test_dir: Directory to save test artifacts.
 
     Returns:
         TestResult with validation status.
@@ -1533,8 +1712,14 @@ def test_nested_information_structures() -> TestResult:
         reference = "System has: module A (with features X, Y), module B (with feature Z)"
         candidate = "System has: module A (with feature X)"
 
-        result_json, _, _ = get_judgement_prompt.run(question, reference, candidate)
+        result_json, messages, response = get_judgement_prompt.run(question, reference, candidate)
         output = json.loads(result_json)
+
+        # Save test artifacts if directory provided
+        if test_dir:
+            save_messages(messages, "msgs_nested_structures", test_dir)
+            result_file = test_dir / "result_nested_structures.json"
+            result_file.write_text(result_json, encoding="utf-8")
 
         if "error" in output:
             result.fail(f"Got error: {output['error']}")
@@ -1575,39 +1760,46 @@ def run_all_tests() -> tuple[int, int]:
     Returns:
         Tuple of (passed_count, failed_count).
     """
+    # Create test output directory with module name
+    test_script_dir = Path(__file__).parent
+    test_module_name = Path(__file__).stem
+    test_dir = test_script_dir / test_module_name
+    test_dir.mkdir(exist_ok=True)
+    print(f"\n=== Output directory: {test_dir.absolute()} ===\n")
+
     # Define test suite - all tests including new ones
     tests = [
-        test_initialization,
-        test_perfect_match,
-        test_partial_match,
-        test_contradiction_detection,
-        test_hallucination_detection,
-        test_empty_candidate,
-        test_numerical_tolerance,
-        test_invalid_json_response,
-        test_incomplete_llm_response,
-        test_empty_reference,
-        test_numerical_tolerance_boundaries,
-        test_unit_conversions,
-        test_llm_api_exceptions,
-        test_input_validation,
-        test_custom_params_merge,
-        test_evidence_array_validation,
-        test_f1_metric_calculation,
-        test_score_thresholds,
-        test_combined_penalties,
-        test_multiline_answers,
-        test_long_answers,
-        test_always_returns_tuple,
-        test_evaluation_scale_calibration,
+        (test_initialization, False),  # No LLM call
+        (test_perfect_match, True),
+        (test_partial_match, True),
+        (test_contradiction_detection, True),
+        (test_hallucination_detection, True),
+        (test_empty_candidate, True),
+        (test_numerical_tolerance, True),
+        (test_invalid_json_response, False),  # No LLM call
+        (test_incomplete_llm_response, False),  # No LLM call
+        (test_empty_reference, False),  # Uses mock
+        (test_numerical_tolerance_boundaries, True),
+        (test_unit_conversions, True),
+        (test_llm_api_exceptions, False),  # Uses mock
+        (test_input_validation, False),  # No LLM call
+        (test_custom_params_merge, False),  # Uses mock
+        (test_evidence_array_validation, False),  # No LLM call
+        (test_f1_metric_calculation, False),  # Uses mock for one part
+        (test_score_thresholds, False),  # No LLM call
+        (test_combined_penalties, False),  # No LLM call
+        (test_multiline_answers, False),  # No LLM call
+        (test_long_answers, False),  # Uses mock
+        (test_always_returns_tuple, False),  # Uses mock
+        (test_evaluation_scale_calibration, True),
         # New critical tests
-        test_precision_with_extra_items,
-        test_contradiction_with_hallucination,
-        test_semantic_equivalence_synonyms,
+        (test_precision_with_extra_items, True),
+        (test_contradiction_with_hallucination, True),
+        (test_semantic_equivalence_synonyms, True),
         # New robustness tests
-        test_partial_contradiction,
-        test_element_order_independence,
-        test_nested_information_structures,
+        (test_partial_contradiction, True),
+        (test_element_order_independence, True),
+        (test_nested_information_structures, True),
     ]
 
     results: list[TestResult] = []
@@ -1615,10 +1807,15 @@ def run_all_tests() -> tuple[int, int]:
     print("=== Symmetric Entailment Judgement Test Suite ===\n")
 
     # Execute each test
-    for i, test_func in enumerate(tests, 1):
+    for i, (test_func, needs_dir) in enumerate(tests, 1):
         print(f"Test {i}: {test_func.__name__.replace('test_', '').replace('_', ' ').title()}")
 
-        result = test_func()
+        # Pass test_dir only to tests that make real LLM calls
+        if needs_dir:
+            result = test_func(test_dir)
+        else:
+            result = test_func()
+
         results.append(result)
 
         if result.passed:
@@ -1632,6 +1829,24 @@ def run_all_tests() -> tuple[int, int]:
     # Calculate summary
     passed = sum(1 for r in results if r.passed)
     failed = sum(1 for r in results if not r.passed)
+
+    # List all saved files
+    saved_files = sorted(test_dir.glob("msgs_*.txt"))
+    result_files = sorted(test_dir.glob("result_*.json"))
+
+    if saved_files:
+        print(f"\nGenerated {len(saved_files)} message files:")
+        for f in saved_files:
+            size = f.stat().st_size
+            print(f"   {f.name:<50} {size:>7,} bytes")
+
+    if result_files:
+        print(f"\nGenerated {len(result_files)} result files:")
+        for f in result_files:
+            size = f.stat().st_size
+            print(f"   {f.name:<50} {size:>7,} bytes")
+
+    print()
 
     return passed, failed
 

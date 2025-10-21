@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# q-reply/judge_answer.py
 """Conference answer judgement script using symmetric entailment evaluation.
 
 This script evaluates the quality of generated answers by comparing them with

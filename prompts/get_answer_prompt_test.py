@@ -1,8 +1,15 @@
+# q-reply/prompts/get_answer_prompt_test.py
 """Test module for get_answer_prompt with proper imports.
 
 This test module validates the answer generation prompt functionality,
 including context mode switching, message generation, and error handling.
 Saves all generated messages to JSON files for analysis.
+
+Example:
+    Run all tests:
+```bash
+    python prompts/get_answer_prompt_test.py
+```
 """
 
 from __future__ import annotations
