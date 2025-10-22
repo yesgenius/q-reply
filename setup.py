@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time  # Added for unique venv renaming
 from typing import NoReturn
 from urllib.error import URLError
 from urllib.request import urlretrieve
@@ -166,7 +167,25 @@ def setup_virtual_environment(venv_path: str) -> None:
     # Remove existing venv if present
     if os.path.exists(venv_path):
         print_status("Removing existing virtual environment", "WARNING")
-        shutil.rmtree(venv_path)
+
+        # Rename before deletion to avoid "Access Denied" on locked files
+        temp_venv_path = f"{venv_path}_old_{int(time.time())}"
+        try:
+            os.rename(venv_path, temp_venv_path)
+            # Try to remove renamed folder, ignore errors silently
+            try:
+                shutil.rmtree(temp_venv_path)
+            except Exception:
+                # Old venv still locked, will be cleaned up manually later
+                print_status(
+                    f"Old venv renamed to {temp_venv_path} (manual cleanup needed)", "WARNING"
+                )
+        except Exception as e:
+            # Rename failed, try direct removal
+            try:
+                shutil.rmtree(venv_path)
+            except Exception:
+                fail_fast(f"Cannot remove existing virtual environment: {e}")
 
     try:
         # Create virtual environment
